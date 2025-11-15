@@ -51,5 +51,5 @@ def main():
     p.disconnect()
 
 if __name__ == "__main__":
-    for i in tqdm.tqdm(range(100000), "Simulation runs:"):
+    for i in tqdm.tqdm(range(1000000), "Simulation runs:"):
         main()
