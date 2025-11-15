@@ -34,6 +34,10 @@ def main():
                      contactStiffness=0,
                      contactDamping=0
                      )
+    p.setGravity(0, 0, -9.81)
+    # Give initial downward velocity (since gravity is off)
+    p.resetBaseVelocity(sphere_id,
+                        linearVelocity=[0, 0, 0])
 
     while frame < max_frames:
         # Store velocities before simulation step
