@@ -6,9 +6,11 @@ import tqdm
 
 from recorder import record_collision
 from scene_creator import create_scene
+MAX_RUNS = 10000
+GRAVITY_RUNS = 100
 
 
-def main():
+def main(should_use_gravity:bool):
     # Connect to PyBullet
     physics_client = p.connect(p.DIRECT)
     # Check connection type
@@ -19,7 +21,7 @@ def main():
     prev_linear_vel = [0, 0, 0]
     prev_angular_vel = [0, 0, 0]
 
-    max_frames, plane_id,  sphere_id, timestep = create_scene(p)
+    max_frames, plane_id,  sphere_id, timestep = create_scene(p, should_use_gravity)
 
     while frame < max_frames:
         # Store velocities before simulation step
@@ -51,5 +53,5 @@ def main():
     p.disconnect()
 
 if __name__ == "__main__":
-    for i in tqdm.tqdm(range(1000000), "Simulation runs:"):
-        main()
+    for i in tqdm.tqdm(range(MAX_RUNS), "Simulation runs:"):
+        main(MAX_RUNS - i < GRAVITY_RUNS)

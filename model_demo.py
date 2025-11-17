@@ -25,6 +25,7 @@ def main():
     prev_angular_vel = [0, 0, 0]
 
     max_frames, plane_id,  sphere_id, timestep = create_scene(p)
+    max_frames = 10000000
     p.changeDynamics(sphere_id, -1,
                      contactProcessingThreshold=0,  # disables solver response
                      restitution=0,
@@ -35,9 +36,9 @@ def main():
                      contactDamping=0
                      )
     p.setGravity(0, 0, -9.81)
-    # Give initial downward velocity (since gravity is off)
+
     p.resetBaseVelocity(sphere_id,
-                        linearVelocity=[0, 0, 0])
+                        linearVelocity=[1, 1, 0])
 
     while frame < max_frames:
         # Store velocities before simulation step

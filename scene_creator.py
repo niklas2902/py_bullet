@@ -4,11 +4,14 @@ from typing import Any
 import pybullet_data
 
 
-def create_scene(p) :
+def create_scene(p, should_use_gravity:bool = False) -> Any :
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
     # No gravity
-    p.setGravity(0, 0, 0)
+    if should_use_gravity:
+        p.setGravity(0, 0, -9.81)
+    else:
+        p.setGravity(0, 0, 0)
 
     # Load plane
     plane_id = p.loadURDF("plane.urdf")
