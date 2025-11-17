@@ -6,12 +6,12 @@ from typing import Any
 import pybullet as p
 import torch
 
-from model import ComplexImpulsePredictor
+from model import ImpulsePredictor
 from scene_creator import create_scene
 
 
 def main():
-    model = ComplexImpulsePredictor(21)
+    model = ImpulsePredictor(21)
     model.load_state_dict(torch.load("best_impulse_model.pth", map_location="cpu"))
     model.eval()
     # Connect to PyBullet
@@ -35,7 +35,7 @@ def main():
                      contactStiffness=0,
                      contactDamping=0
                      )
-    #p.setGravity(0, 0, -9.81)
+    p.setGravity(0, 0, -9.81)
 
     p.resetBaseVelocity(sphere_id,
                         linearVelocity=[0, 1, -1])
@@ -70,7 +70,7 @@ def main():
     p.disconnect()
 
 
-def apply_force(contact_points, current_angular_vel, current_linear_vel, model: ComplexImpulsePredictor,
+def apply_force(contact_points, current_angular_vel, current_linear_vel, model: ImpulsePredictor,
                 prev_angular_vel, prev_linear_vel, cube_id, timestep: float):
 
     for cp in contact_points:
@@ -123,11 +123,9 @@ def apply_force(contact_points, current_angular_vel, current_linear_vel, model: 
             pred = model(x)[0]
 
         linear_impulse = pred[:3].numpy()
-        angular_impulse = pred[3:].numpy()
 
         # Force = impulse (per step)
         force = linear_impulse
-        torque = angular_impulse
 
         # -------------------------------
         # 3. Apply forces at the contact
@@ -140,12 +138,6 @@ def apply_force(contact_points, current_angular_vel, current_linear_vel, model: 
             flags=p.WORLD_FRAME
         )
 
-        p.applyExternalTorque(
-            objectUniqueId=cube_id,
-            linkIndex=-1,
-            torqueObj=torque,
-            flags=p.WORLD_FRAME
-        )
 
 
 

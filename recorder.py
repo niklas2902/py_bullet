@@ -45,7 +45,6 @@ def record_collision(p, collision_data: list[Any], contact_points, frame: int, p
     pos, quat = p.getBasePositionAndOrientation(sphere_id)
     linear_vel, angular_vel = p.getBaseVelocity(sphere_id)
 
-
     # Extract impulse from contact points
     for contact in contact_points:
         total_impulse = [0, 0, 0]
@@ -56,23 +55,26 @@ def record_collision(p, collision_data: list[Any], contact_points, frame: int, p
         normal_impulse = contact[9]
         contact_normal = contact[7]
 
-        # Add the impulse (force * dt, but PyBullet gives us the impulse directly)
+        # Calculate the linear impulse vector
+        impulse_vec = [normal_impulse * contact_normal[i] for i in range(3)]
+
+        # Add the impulse
         for i in range(3):
-            total_impulse[i] += normal_impulse * contact_normal[i]
+            total_impulse[i] += impulse_vec[i]
 
         # For angular impulse, we need the contact position and the impulse
         contact_pos_on_self = contact[5]  # Position on bodyA (sphere)
 
-        # Calculate torque = r × F (cross product of position and force)
+        # Calculate angular impulse = r × impulse (cross product of position and impulse)
         r = [contact_pos_on_self[i] - pos[i] for i in range(3)]
-        torque = [
-            r[1] * (normal_impulse * contact_normal[2]) - r[2] * (normal_impulse * contact_normal[1]),
-            r[2] * (normal_impulse * contact_normal[0]) - r[0] * (normal_impulse * contact_normal[2]),
-            r[0] * (normal_impulse * contact_normal[1]) - r[1] * (normal_impulse * contact_normal[0])
+        angular_impulse = [
+            r[1] * impulse_vec[2] - r[2] * impulse_vec[1],
+            r[2] * impulse_vec[0] - r[0] * impulse_vec[2],
+            r[0] * impulse_vec[1] - r[1] * impulse_vec[0]
         ]
 
         for i in range(3):
-            total_angular_impulse[i] += torque[i]
+            total_angular_impulse[i] += angular_impulse[i]
 
         # Get plane position and orientation
         plane_pos, plane_quat = p.getBasePositionAndOrientation(plane_id)
