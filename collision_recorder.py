@@ -21,21 +21,21 @@ def main(should_use_gravity:bool):
     prev_linear_vel = [0, 0, 0]
     prev_angular_vel = [0, 0, 0]
 
-    max_frames, plane_id,  sphere_id, timestep = create_scene(p, should_use_gravity)
+    max_frames, plane_id,  cube_id, timestep = create_scene(p, should_use_gravity)
 
     while frame < max_frames:
         # Store velocities before simulation step
-        current_linear_vel, current_angular_vel = p.getBaseVelocity(sphere_id)
+        current_linear_vel, current_angular_vel = p.getBaseVelocity(cube_id)
 
         # Step simulation
         p.stepSimulation()
 
         # Get contact points
-        contact_points = p.getContactPoints(bodyA=sphere_id, bodyB=plane_id)
+        contact_points = p.getContactPoints(bodyA=cube_id, bodyB=plane_id)
 
         if contact_points:
             record_collision(p, collision_data, contact_points, frame, plane_id, prev_angular_vel, prev_linear_vel,
-                             sphere_id)
+                             cube_id)
 
         # Update previous velocities
         prev_linear_vel = current_linear_vel

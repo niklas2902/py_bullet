@@ -11,7 +11,7 @@ from scene_creator import create_scene
 
 
 def main():
-    model = ComplexImpulsePredictor(12)
+    model = ComplexImpulsePredictor(21)
     model.load_state_dict(torch.load("best_impulse_model.pth", map_location="cpu"))
     model.eval()
     # Connect to PyBullet
@@ -35,10 +35,10 @@ def main():
                      contactStiffness=0,
                      contactDamping=0
                      )
-    p.setGravity(0, 0, -9.81)
+    #p.setGravity(0, 0, -9.81)
 
     p.resetBaseVelocity(sphere_id,
-                        linearVelocity=[1, 1, 0])
+                        linearVelocity=[0, 1, -1])
 
     while frame < max_frames:
         # Store velocities before simulation step
@@ -71,54 +71,82 @@ def main():
 
 
 def apply_force(contact_points, current_angular_vel, current_linear_vel, model: ComplexImpulsePredictor,
-                prev_angular_vel: list[int] | Any, prev_linear_vel: list[int] | Any, sphere_id, timestep: float):
-    cp = contact_points[0]
+                prev_angular_vel, prev_linear_vel, cube_id, timestep: float):
 
-    # -------------------------------
-    # 1. Build model input (18 dims)
-    # -------------------------------
-    # Example feature vector — adjust to match your training dataset
-    # 1. Get velocities
-    lin, ang = p.getBaseVelocity(sphere_id)
+    for cp in contact_points:
 
-    # 2. Get orientation → Euler
-    pos, orn = p.getBasePositionAndOrientation(sphere_id)
-    roll, pitch, yaw = p.getEulerFromQuaternion(orn)
+        # --------------------
+        # 0. Extract positions
+        # --------------------
+        cube_pos, cube_orn = p.getBasePositionAndOrientation(cube_id)
+        cube_roll, cube_pitch, cube_yaw = p.getEulerFromQuaternion(cube_orn)
 
-    # 3. Build SAME EXACT feature vector used in training
-    features = [
-        lin[0], lin[1], lin[2],
-        ang[0], ang[1], ang[2],
-        math.sin(roll), math.cos(roll),
-        math.sin(pitch), math.cos(pitch),
-        math.sin(yaw), math.cos(yaw),
-    ]
+        collider_id = cp[2]  # bodyUniqueIdB
+        collider_pos, collider_orn = p.getBasePositionAndOrientation(collider_id)
+        col_roll, col_pitch, col_yaw = p.getEulerFromQuaternion(collider_orn)
 
-    x = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
-    with torch.no_grad():
-        pred = model(x)[0]
+        # Contact point in world space
+        contact_point = cp[5]  # = contactPositionOnA
+        cx, cy, cz = contact_point
 
-    linear_impulse = pred[:3].numpy()
-    angular_impulse = pred[3:].numpy()
+        # -------------------------------
+        # 1. Build model input (ADD POS)
+        # -------------------------------
 
-    # -------------------------------
-    # 2. Convert impulses → forces
-    # -------------------------------
-    force = linear_impulse
-    torque = angular_impulse
-    print("Force:", force)
+        # 1. cube velocity
+        lin, ang = p.getBaseVelocity(cube_id)
 
-    # -------------------------------
-    # 3. Apply forces
-    # -------------------------------
-    pos, _ = p.getBasePositionAndOrientation(sphere_id)
-    p.applyExternalForce(
-        objectUniqueId=sphere_id,
-        linkIndex=-1,
-        forceObj=force,
-        posObj=pos,
-        flags=p.WORLD_FRAME
-    )
+        # Final feature vector (example):
+        features = [
+            # cube linear vel
+            lin[0], lin[1], lin[2],
+
+            # cube angular vel
+            ang[0], ang[1], ang[2],
+            cx, cy, cz,
+            cube_pos[0], cube_pos[1], cube_pos[2],
+            collider_pos[0], collider_pos[1], collider_pos[2],
+
+
+            # cube orientation (encoded)
+            math.sin(cube_roll), math.cos(cube_roll),
+            math.sin(cube_pitch), math.cos(cube_pitch),
+            math.sin(cube_yaw), math.cos(cube_yaw),
+        ]
+
+        # Convert to tensor
+        x = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
+
+        print(x.shape)
+
+        with torch.no_grad():
+            pred = model(x)[0]
+
+        linear_impulse = pred[:3].numpy()
+        angular_impulse = pred[3:].numpy()
+
+        # Force = impulse (per step)
+        force = linear_impulse
+        torque = angular_impulse
+
+        # -------------------------------
+        # 3. Apply forces at the contact
+        # -------------------------------
+        p.applyExternalForce(
+            objectUniqueId=cube_id,
+            linkIndex=-1,
+            forceObj=force,
+            posObj=contact_point,   # world position
+            flags=p.WORLD_FRAME
+        )
+
+        p.applyExternalTorque(
+            objectUniqueId=cube_id,
+            linkIndex=-1,
+            torqueObj=torque,
+            flags=p.WORLD_FRAME
+        )
+
 
 
 if __name__ == "__main__":
