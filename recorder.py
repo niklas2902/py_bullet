@@ -38,7 +38,7 @@ def create_transform_data(p, pos, quat, scale):
     }
 
 
-def record_collision(p, collision_data: list[Any], contact_points, frame: int, plane_id,
+def record_collision(p, collision_data: list[Any], collision_points:list[Any], contact_points, frame: int, plane_id,
                      prev_angular_vel: list[int] | Any,
                      prev_linear_vel: list[int] | Any, sphere_id):
     # Get current state after collision
@@ -46,6 +46,9 @@ def record_collision(p, collision_data: list[Any], contact_points, frame: int, p
     linear_vel, angular_vel = p.getBaseVelocity(sphere_id)
 
     # Extract impulse from contact points
+    id = 0
+    collision_point_entry={}
+    points = []
     for contact in contact_points:
         total_impulse = [0, 0, 0]
         total_angular_impulse = [0, 0, 0]
@@ -78,6 +81,41 @@ def record_collision(p, collision_data: list[Any], contact_points, frame: int, p
 
         # Get plane position and orientation
         plane_pos, plane_quat = p.getBasePositionAndOrientation(plane_id)
+
+        collision_point_entry["self_position"] ={
+                "x": float(pos[0]),
+                "y": float(pos[1]),
+                "z": float(pos[2])
+            }
+
+        collision_point_entry["self_rotation"] ={
+                "x": float(quat[0]),
+                "y": float(quat[1]),
+                "z": float(quaternion_to_euler(p, quat))
+            }
+        collision_point_entry["collider_position"] = {
+                "x": float(plane_pos[0]),
+                "y": float(plane_pos[1]),
+                "z": float(plane_pos[2])
+            },
+        collision_point_entry["self_rotation"] = {
+               "x": float(quat[0]),
+                "y": float(quat[1]),
+                "z": float(quaternion_to_euler(p, quat))
+
+        }
+        collision_point_entry["collider_rotation"]=  {
+            "x": float(plane_quat[0]),
+            "y": float(plane_quat[1]),
+            "z": float(quaternion_to_euler(p, plane_quat))
+        },
+        points.append({
+            "contact_position": {
+                "x": float(contact_pos_on_self[0]),
+                "y": float(contact_pos_on_self[1]),
+                "z": float(contact_pos_on_self[2])
+            },
+        })
 
         collision_entry = {
             "frame": frame,
@@ -155,5 +193,45 @@ def record_collision(p, collision_data: list[Any], contact_points, frame: int, p
             },
             "collider_transform": create_transform_data(p, plane_pos, plane_quat, [1.0, 1.0, 1.0])
         }
-
         collision_data.append(collision_entry)
+    collision_point_entry["points"] = points
+    collision_points.append(collision_point_entry)
+
+def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points:list[Any]):
+    # Get current state after collision
+    pos, quat = p.getBasePositionAndOrientation(cube_id)
+
+    collision_point_entry={}
+    # Get plane position and orientation
+    plane_pos, plane_quat = p.getBasePositionAndOrientation(plane_id)
+
+    collision_point_entry["self_position"] = {
+        "x": float(pos[0]),
+        "y": float(pos[1]),
+        "z": float(pos[2])
+    }
+
+    collision_point_entry["self_rotation"] = {
+        "x": float(quat[0]),
+        "y": float(quat[1]),
+        "z": float(quaternion_to_euler(p, quat))
+    }
+    collision_point_entry["collider_position"] = {
+        "x": float(plane_pos[0]),
+        "y": float(plane_pos[1]),
+        "z": float(plane_pos[2])
+    },
+    collision_point_entry["self_rotation"] = {
+        "x": float(quat[0]),
+        "y": float(quat[1]),
+        "z": float(quaternion_to_euler(p, quat))
+
+    }
+    collision_point_entry["collider_rotation"] = {
+        "x": float(plane_quat[0]),
+        "y": float(plane_quat[1]),
+        "z": float(quaternion_to_euler(p, plane_quat))
+    },
+
+    collision_point_entry["points"] = []
+    empty_collision_points.append(collision_point_entry)

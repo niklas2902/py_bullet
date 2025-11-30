@@ -43,7 +43,7 @@ def create_scene(p, should_use_gravity:bool = False) -> Any :
     )
 
     # Make sphere bouncy
-    p.changeDynamics(cube_id, -1, restitution=0.9)
+    p.changeDynamics(cube_id, -1, restitution=0.5)
 
     # Give initial downward velocity (since gravity is off)
     p.resetBaseVelocity(cube_id,
@@ -52,9 +52,7 @@ def create_scene(p, should_use_gravity:bool = False) -> Any :
 
     timestep = 1.0 / 240.0
     p.setTimeStep(timestep)
-
-    max_frames = 1000  # Run for limited frames for testing
-    return  max_frames, plane_id, cube_id, timestep
+    return  plane_id, cube_id, timestep
 
 
 def random_angular_velocity(strength=5.0):

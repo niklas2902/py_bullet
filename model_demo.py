@@ -24,7 +24,7 @@ def main():
     prev_linear_vel = [0, 0, 0]
     prev_angular_vel = [0, 0, 0]
 
-    max_frames, plane_id,  sphere_id, timestep = create_scene(p)
+    plane_id,  sphere_id, timestep = create_scene(p)
     max_frames = 10000000
     p.changeDynamics(sphere_id, -1,
                      contactProcessingThreshold=0,  # disables solver response
@@ -123,6 +123,7 @@ def apply_force(contact_points, current_angular_vel, current_linear_vel, model: 
             pred = model(x)[0]
 
         linear_impulse = pred[:3].numpy()
+        torque = pred[3:].numpy()
 
         # Force = impulse (per step)
         force = linear_impulse
@@ -136,6 +137,13 @@ def apply_force(contact_points, current_angular_vel, current_linear_vel, model: 
             forceObj=force,
             posObj=contact_point,   # world position
             flags=p.WORLD_FRAME
+        )
+
+        p.applyExternalTorque(
+            objectUniqueId=cube_id,
+            linkIndex=-1,  # -1 for base, or specific link index
+            torqueObj=torque,  # Torque vector in world coordinates
+            flags=p.WORLD_FRAME  # or p.LINK_FRAME
         )
 
 
