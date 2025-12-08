@@ -7,8 +7,8 @@ import tqdm
 
 from recorder import record_collision, record_collision_empty
 from scene_creator import create_scene
-MAX_RUNS = 10000
-GRAVITY_RUNS = 100
+MAX_RUNS = 20000
+GRAVITY_RUNS = 200
 MAX_FRAMES_GRAVITY = 1000
 MAX_FRAMES_NORMAL = 200
 

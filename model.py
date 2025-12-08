@@ -2,118 +2,122 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class ResidualBlock(nn.Module):
-    """Simple residual block for MLP"""
-
-    def __init__(self, dim):
-        super().__init__()
-        self.layer = nn.Sequential(
-            nn.Linear(dim, dim),
-            nn.SiLU(),
-            nn.Linear(dim, dim),
-        )
-
-    def forward(self, x):
-        return x + self.layer(x)
-
 
 class ImpulsePredictor(nn.Module):
-    """Physics-aware impulse predictor"""
-
-    def __init__(self, input_dim=21, hidden_dim=128, dropout=0.1):
+    def __init__(self,
+                 input_size=30,
+                 max_contacts=4,
+                 mass=1.0,
+                 gravity=9.81,
+                 timestep=1 / 240.0):
         super().__init__()
 
-        self.input_ln = nn.LayerNorm(input_dim)
+        self.max_contacts = max_contacts
+        self.mass = mass
+        self.gravity = gravity
+        self.timestep = timestep
 
-        # Separate encoders for different physical quantities
-        # Adjust these dimensions based on your actual input structure
-        self.velocity_encoder = nn.Sequential(
-            nn.Linear(6, 64),  # Assuming 6D velocity (linear + angular)
+        # ---------------------------------------------------------
+        # 1. SHARED ENCODER
+        # Process raw inputs into a high-level physics latent state
+        # ---------------------------------------------------------
+        self.shared_encoder = nn.Sequential(
+            nn.Linear(input_size, 128),
+            nn.LayerNorm(128),  # Stabilizes training
+            nn.SiLU(),  # Swish activation (often better for physics than ReLU)
+            nn.Linear(128, 256),
+            nn.LayerNorm(256),
             nn.SiLU(),
-            nn.Dropout(dropout)
         )
 
-        self.geometry_encoder = nn.Sequential(
-            nn.Linear(9, 64),  # Collision geometry features
-            nn.SiLU(),
-            nn.Dropout(dropout)
+        # ---------------------------------------------------------
+        # 2. SEPARATE BRANCHES
+        # Split processing for Linear (Force) vs Angular (Torque)
+        # ---------------------------------------------------------
+
+        # Branch for Linear Impulses
+        self.linear_branch = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.SiLU()
         )
 
-        self.material_encoder = nn.Sequential(
-            nn.Linear(6, 32),  # Material/mass properties
-            nn.SiLU(),
-            nn.Dropout(dropout)
+        # Branch for Angular Impulses
+        self.angular_branch = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.SiLU()
         )
 
-        # Fusion network
-        combined_dim = 64 + 64 + 32
-        self.fusion = nn.Sequential(
-            nn.Linear(combined_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            ResidualBlock(hidden_dim),
-            ResidualBlock(hidden_dim),
-        )
+        # ---------------------------------------------------------
+        # 3. SPECIALIZED OUTPUT HEADS
+        # ---------------------------------------------------------
 
-        # Output heads with skip connections
-        self.linear_head = nn.Sequential(
-            nn.Linear(hidden_dim + combined_dim, 128),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            nn.Linear(128, 3)
-        )
+        # Head A: Tangential Linear Impulse (X, Y)
+        # No constraints, can be positive or negative
+        self.head_tangential = nn.Linear(128, max_contacts * 2)
 
-        self.angular_head = nn.Sequential(
-            nn.Linear(hidden_dim + combined_dim, 128),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            nn.Linear(128, 3)
-        )
+        # Head B: Normal Linear Impulse (Z)
+        # MUST be non-negative (objects don't stick/pull)
+        self.head_normal = nn.Linear(128, max_contacts * 1)
 
-        # Auxiliary predictions for multi-task learning
-        self.contact_force_head = nn.Sequential(
-            nn.Linear(hidden_dim, 1),
-            nn.Softplus()  # Ensure positive force
-        )
+        # Head C: Angular Impulse (X, Y, Z)
+        # No constraints
+        self.head_angular = nn.Linear(128, max_contacts * 3)
 
-        self.restitution_head = nn.Sequential(
-            nn.Linear(hidden_dim, 1),
-            nn.Sigmoid()  # Bound between 0 and 1
-        )
+        # Initialize biases to start with valid physics
+        self._initialize_physics_biases()
 
-    def forward(self, x, return_aux=False):
-        x = self.input_ln(x)
+    def _initialize_physics_biases(self):
+        """
+        Sets the bias of the normal head so the network starts by
+        predicting a force that exactly counteracts gravity.
+        """
+        # Impulse J = F * dt. Force F = m * g.
+        expected_normal_impulse = self.mass * self.gravity * self.timestep
 
-        # Split input based on your feature structure
-        # Adjust indices based on your actual data
-        vel_features = x[:, :6]
-        geom_features = x[:, 6:15]
-        mat_features = x[:, 15:21]
+        with torch.no_grad():
+            # Tangential and Angular start at 0 (neutral)
+            self.head_tangential.bias.fill_(0.0)
+            self.head_angular.bias.fill_(0.0)
 
-        # Encode different physics components
-        vel_enc = self.velocity_encoder(vel_features)
-        geom_enc = self.geometry_encoder(geom_features)
-        mat_enc = self.material_encoder(mat_features)
+            # Normal starts at gravity compensation
+            # We use inverse softplus (approx log(exp(y)-1)) or just a direct value
+            # if we expect the pre-activation to be passed to softplus.
+            # Since softplus(x) ≈ x for large x, setting bias to expected_val is safe.
+            self.head_normal.bias.fill_(expected_normal_impulse)
 
-        # Combine encodings
-        combined = torch.cat([vel_enc, geom_enc, mat_enc], dim=1)
+    def forward(self, x):
+        batch_size = x.shape[0]
 
-        # Process through fusion network
-        h = self.fusion(combined)
+        # --- Shared Processing ---
+        features = self.shared_encoder(x)
 
-        # Generate outputs with skip connections
-        features_skip = torch.cat([h, combined], dim=1)
-        linear_out = self.linear_head(features_skip)
-        angular_out = self.angular_head(features_skip)
+        # --- Branch Processing ---
+        linear_feat = self.linear_branch(features)
+        angular_feat = self.angular_branch(features)
 
-        impulse = torch.cat([linear_out, angular_out], dim=1)
+        # --- Predictions ---
 
-        if return_aux:
-            aux = {
-                'contact_force': self.contact_force_head(h),
-                'restitution': self.restitution_head(h)
-            }
-            return impulse, aux
+        # 1. Tangential (X, Y) - Unconstrained
+        tangential = self.head_tangential(linear_feat)  # [Batch, Contacts*2]
+        tangential = tangential.view(batch_size, self.max_contacts, 2)
 
-        return impulse
+        # 2. Normal (Z) - Constrained to be Positive
+        normal_raw = self.head_normal(linear_feat)  # [Batch, Contacts*1]
+        # Softplus ensures Normal Impulse is always > 0 (Physics constraint)
+        normal = F.softplus(normal_raw)
+        normal = normal.view(batch_size, self.max_contacts, 1)
+
+        # 3. Angular - Unconstrained
+        angular = self.head_angular(angular_feat)  # [Batch, Contacts*3]
+        angular = angular.view(batch_size, -1)  # Flatten
+
+        # --- Assembly ---
+
+        # Combine X,Y (tangential) and Z (normal)
+        linear = torch.cat([tangential, normal], dim=2)  # [Batch, Contacts, 3]
+        linear = linear.view(batch_size, -1)  # Flatten
+
+        # Final concat: [Linear_All_Contacts, Angular_All_Contacts]
+        output = torch.cat([linear, angular], dim=1)
+
+        return output
