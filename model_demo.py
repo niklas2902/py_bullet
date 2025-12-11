@@ -86,13 +86,6 @@ def apply_force(contact_points,
             flags=p.WORLD_FRAME
         )
 
-        p.applyExternalTorque(
-            objectUniqueId=cube_id,
-            linkIndex=-1,
-            torqueObj=torque.tolist(),
-            flags=p.WORLD_FRAME
-        )
-
 
 def main():
     model = ImpulsePredictor(30)

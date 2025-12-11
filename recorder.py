@@ -37,10 +37,18 @@ def create_transform_data(p, pos, quat, scale):
         }
     }
 
+def to_vector(list_vector):
+    output = {}
+
+    for index, element in enumerate(["x", "y", "z"]):
+        output[element] = list_vector[index]
+    return output
+
 
 def record_collision(p, collision_data: list[Any], collision_points:list[Any], contact_points, frame: int, plane_id,
                      prev_angular_vel: list[int] | Any,
                      prev_linear_vel: list[int] | Any, sphere_id):
+    from own_physics import calculate_force
     # Get current state after collision
     pos, quat = p.getBasePositionAndOrientation(sphere_id)
     linear_vel, angular_vel = p.getBaseVelocity(sphere_id)
@@ -80,34 +88,12 @@ def record_collision(p, collision_data: list[Any], collision_points:list[Any], c
     },
 
     for contact in contact_points:
-        total_impulse = [0, 0, 0]
-        total_angular_impulse = [0, 0, 0]
 
-        # contact[9] is the normal force (impulse magnitude)
-        # contact[7] is the contact normal on B
-        normal_impulse = contact[9]
         contact_normal = contact[7]
-
-        # Calculate the linear impulse vector
-        impulse_vec = [normal_impulse * contact_normal[i] for i in range(3)]
-
-        # Add the impulse
-        for i in range(3):
-            total_impulse[i] += impulse_vec[i]
-
         # For angular impulse, we need the contact position and the impulse
         contact_pos_on_self = contact[5]  # Position on bodyA (sphere)
 
-        # Calculate angular impulse = r × impulse (cross product of position and impulse)
-        r = [contact_pos_on_self[i] - pos[i] for i in range(3)]
-        angular_impulse = [
-            r[1] * impulse_vec[2] - r[2] * impulse_vec[1],
-            r[2] * impulse_vec[0] - r[0] * impulse_vec[2],
-            r[0] * impulse_vec[1] - r[1] * impulse_vec[0]
-        ]
-
-        for i in range(3):
-            total_angular_impulse[i] += angular_impulse[i]
+        force = calculate_force(contact, sphere_id, contact_normal)
 
         points.append({
             "contact_position": {
@@ -115,18 +101,16 @@ def record_collision(p, collision_data: list[Any], collision_points:list[Any], c
                 "y": float(contact_pos_on_self[1]),
                 "z": float(contact_pos_on_self[2])
             },
-            "impulse": {
-                "x": float(total_impulse[0]),
-                "y": float(total_impulse[1]),
-                "z": float(total_impulse[2])
+            "force": {
+                "x": float(force[0]),
+                "y": float(force[1]),
+                "z": float(force[2])
             },
-            "angular_impulse": {
-                "x": float(total_angular_impulse[0]),
-                "y": float(total_angular_impulse[1]),
-                "z": float(total_angular_impulse[2])
-            }})
 
-    not_let_cube_pass_ground(points)
+        "penetration": contact[8],
+        "contact_normal": to_vector(contact[7])
+        })
+
     collision_entry = {
         "frame": frame,
         "pre_collision_linear_velocity": {
@@ -191,17 +175,6 @@ def record_collision(p, collision_data: list[Any], collision_points:list[Any], c
     collision_data.append(collision_entry)
     collision_point_entry["points"] = points
     collision_points.append(collision_point_entry)
-def sum_z(points):
-    sum = 0
-    for point in points:
-        sum += point["impulse"]["z"]
-    return sum
-
-def not_let_cube_pass_ground(points):
-    sum = sum_z(points)
-    if sum < 9.81:
-        for point in points:
-            point["impulse"]["z"] = 9.81 / len(points)
 
 def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points:list[Any]):
     # Get current state after collision

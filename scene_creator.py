@@ -50,7 +50,7 @@ def create_scene(p, should_use_gravity:bool = False) -> Any :
                         linearVelocity=[random.uniform(10, -10), random.uniform(10, -10), random.uniform(-1, -10)],
                         angularVelocity=random_angular_velocity())
 
-    timestep = 1.0 / 240.0
+    timestep = 1.0 / 240
     p.setTimeStep(timestep)
     return  plane_id, cube_id, timestep
 
