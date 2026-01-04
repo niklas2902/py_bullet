@@ -5,7 +5,7 @@ from typing import Any
 import pybullet_data
 
 
-def create_scene(p, should_use_gravity:bool = False) -> Any :
+def create_scene(p, should_use_gravity: bool = False) -> Any:
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
     # No gravity
@@ -20,7 +20,7 @@ def create_scene(p, should_use_gravity:bool = False) -> Any :
     # Make the plane bouncy
     p.changeDynamics(plane_id, -1, restitution=0.9)
 
-    # Create sphere
+    # Create cube
     cube_size = 0.5  # full edge length of the cube
     half = cube_size / 2
 
@@ -42,17 +42,27 @@ def create_scene(p, should_use_gravity:bool = False) -> Any :
         baseOrientation=random_quaternion()
     )
 
-    # Make sphere bouncy
+    # Make cube bouncy
     p.changeDynamics(cube_id, -1, restitution=0.5)
+
+    # **DISABLE COLLISION RESPONSE but KEEP COLLISION DETECTION**
+    p.setCollisionFilterPair(plane_id, cube_id, -1, -1, enableCollision=1)
+    # Set contact processing to only report contacts, not resolve them
+    p.changeDynamics(plane_id, -1, contactProcessingThreshold=0)
+    p.changeDynamics(cube_id, -1, contactProcessingThreshold=0)
+
+    # Make both objects have zero contact stiffness and damping
+    p.changeDynamics(plane_id, -1, contactStiffness=0, contactDamping=0)
+    p.changeDynamics(cube_id, -1, contactStiffness=0, contactDamping=0)
 
     # Give initial downward velocity (since gravity is off)
     p.resetBaseVelocity(cube_id,
-                        linearVelocity=[random.uniform(10, -10), random.uniform(10, -10), random.uniform(-1, -10)],
+                        linearVelocity=[random.uniform(-10, 10), random.uniform(-10, 10), random.uniform(-10, -1)],
                         angularVelocity=random_angular_velocity())
 
     timestep = 1.0 / 240
     p.setTimeStep(timestep)
-    return  plane_id, cube_id, timestep
+    return plane_id, cube_id, timestep
 
 
 def random_angular_velocity(strength=5.0):

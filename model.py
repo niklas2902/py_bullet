@@ -2,70 +2,47 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class ImpulsePredictor(nn.Module):
-    def __init__(self,
-                 input_size=67,  # 6+6+6+1+3+2+44+1 = 69, but your data shows 67
-                 max_contacts=4,
-                 mass=1.0,
-                 gravity=9.81,
-                 timestep=1/240.0):
+class ContactPointsPredictor(nn.Module):
+    def __init__(self, input_dim=18, output_dim=13,
+                 hidden_dims=[1024, 512,256,128,64,32], dropout=0.1):
         super().__init__()
 
-        self.max_contacts = max_contacts
-        self.mass = mass
-        self.gravity = gravity
-        self.timestep = timestep
+        layers = []
+        prev_dim = input_dim
 
-        # Shared encoder
-        self.shared_encoder = nn.Sequential(
-            nn.Linear(input_size, 256),
-            nn.LayerNorm(256),
-            nn.SiLU(),
-            nn.Dropout(0.1),
-            nn.Linear(256, 512),
-            nn.LayerNorm(512),
-            nn.SiLU(),
-            nn.Dropout(0.1),
-            nn.Linear(512, 256),
-            nn.LayerNorm(256),
-            nn.SiLU(),
-        )
+        for h in hidden_dims:
+            layers.append(nn.Linear(prev_dim, h))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+            prev_dim = h
 
-        # Linear impulse branch
-        self.linear_branch = nn.Sequential(
-            nn.Linear(256, 128),
-            nn.SiLU(),
-            nn.Dropout(0.1),
-        )
+        # output layer
+        layers.append(nn.Linear(prev_dim, output_dim))
 
-        # Output head - predicting 3 values per contact point
-        # Linear impulse: 3 components (x, y, z)
-        self.head_linear = nn.Linear(128, max_contacts * 3)
-
-        self._initialize_physics_biases()
-
-    def _initialize_physics_biases(self):
-        """Initialize biases with physics-informed values"""
-        with torch.no_grad():
-            # Start with small random values
-            self.head_linear.bias.normal_(0.0, 0.01)
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x):
-        batch_size = x.shape[0]
+        return self.net(x)
 
-        # Shared encoding
-        features = self.shared_encoder(x)
 
-        # Branch processing
-        linear_feat = self.linear_branch(features)
+class ImpulsePredictor(nn.Module):
+    def __init__(self, input_dim=18, output_dim=12,
+                 hidden_dims=[64,32], dropout=0.1):
+        super().__init__()
 
-        # Predictions
-        linear_impulses = self.head_linear(linear_feat)  # [Batch, Contacts*3]
+        layers = []
+        prev_dim = input_dim
 
-        # Reshape to [Batch, Contacts, 3]
-        linear_impulses = linear_impulses.view(batch_size, self.max_contacts, 3)
+        for h in hidden_dims:
+            layers.append(nn.Linear(prev_dim, h))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+            prev_dim = h
 
-        # Output: for each contact, output [lin_x, lin_y, lin_z]
-        output = linear_impulses.view(batch_size, self.max_contacts * 3)  # [Batch, 12] (4 contacts * 3 values)
+        # output layer
+        layers.append(nn.Linear(prev_dim, output_dim))
 
-        return output
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
