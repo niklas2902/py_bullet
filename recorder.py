@@ -47,11 +47,11 @@ def to_vector(list_vector):
 
 def record_collision(p, collision_data: list[Any], collision_points:list[Any], contact_points, frame: int, plane_id,
                      prev_angular_vel: list[int] | Any,
-                     prev_linear_vel: list[int] | Any, sphere_id):
+                     current_linear_vel: list[int] | Any, sphere_id):
     from own_physics import calculate_force
     # Get current state after collision
     pos, quat = p.getBasePositionAndOrientation(sphere_id)
-    linear_vel, angular_vel = p.getBaseVelocity(sphere_id)
+    _, angular_vel = p.getBaseVelocity(sphere_id)
 
     # Extract impulse from contact points
     id = 0
@@ -93,7 +93,7 @@ def record_collision(p, collision_data: list[Any], collision_points:list[Any], c
         # For angular impulse, we need the contact position and the impulse
         contact_pos_on_self = contact[5]  # Position on bodyA (sphere)
 
-        force = calculate_force(contact, sphere_id, contact_normal)
+        force = calculate_force(contact, sphere_id, current_linear_vel)
 
         points.append({
             "contact_position": {
@@ -113,20 +113,10 @@ def record_collision(p, collision_data: list[Any], collision_points:list[Any], c
 
     collision_entry = {
         "frame": frame,
-        "pre_collision_linear_velocity": {
-            "x": float(prev_linear_vel[0]),
-            "y": float(prev_linear_vel[1]),
-            "z": float(prev_linear_vel[2])
-        },
-        "pre_collision_angular_velocity": {
-            "x": float(prev_angular_vel[0]),
-            "y": float(prev_angular_vel[1]),
-            "z": float(prev_angular_vel[2])
-        },
         "linear_velocity": {
-            "x": float(linear_vel[0]),
-            "y": float(linear_vel[1]),
-            "z": float(linear_vel[2])
+            "x": float(current_linear_vel[0]),
+            "y": float(current_linear_vel[1]),
+            "z": float(current_linear_vel[2])
         },
         "angular_velocity": {
             "x": float(angular_vel[0]),

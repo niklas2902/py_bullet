@@ -14,9 +14,9 @@ from scene_creator import create_scene
 SPRING_CONSTANT = 1000 #N/m
 DAMPENING = 0.9
 BOUNCINESS_FACTOR = 0.3
-MAX_RUNS = 20000
+MAX_RUNS = 1000
 GRAVITY_RUNS = 200
-MAX_FRAMES_GRAVITY = 1000
+MAX_FRAMES_GRAVITY = 10
 MAX_FRAMES_NORMAL = 200
 def apply_force(contact_points,
                 current_angular_vel, current_linear_vel,
@@ -71,6 +71,9 @@ def main(should_use_gravity:bool):
     prev_linear_vel = [0, 0, 0]
     prev_angular_vel = [0, 0, 0]
 
+    current_linear_vel = [0,0,0]
+    current_angular_vel = [0,0,0]
+
     plane_id,  cube_id, timestep = create_scene(p, should_use_gravity)
     max_frames = MAX_FRAMES_GRAVITY if should_use_gravity else MAX_FRAMES_NORMAL
     while frame < max_frames:
@@ -84,14 +87,12 @@ def main(should_use_gravity:bool):
         # Get contact points
         contact_points = p.getContactPoints(bodyA=cube_id, bodyB=plane_id)
         if contact_points:
-            record_collision(p, collision_data, collision_point_data, contact_points, frame, plane_id, prev_angular_vel, prev_linear_vel,
+            record_collision(p, collision_data, collision_point_data, contact_points, frame, plane_id, prev_angular_vel, current_linear_vel,
                              cube_id)
 
             apply_force(contact_points, current_angular_vel, current_linear_vel,
                         None, prev_angular_vel, prev_linear_vel, cube_id, plane_id, timestep)
 
-            # DEBUG: Check velocity after applying forces
-            vel_after, _ = p.getBaseVelocity(cube_id)
 
         else:
             record_collision_empty(p, plane_id, cube_id, collision_point_data_empty)

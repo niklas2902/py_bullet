@@ -25,7 +25,8 @@ class ContactPointsPredictor(nn.Module):
         return self.net(x)
 
 
-class ImpulsePredictor(nn.Module):
+
+class ImpulesePredictor(nn.Module):
     def __init__(self, input_dim=18, output_dim=12,
                  hidden_dims=[64,32], dropout=0.1):
         super().__init__()
@@ -35,7 +36,7 @@ class ImpulsePredictor(nn.Module):
 
         for h in hidden_dims:
             layers.append(nn.Linear(prev_dim, h))
-            layers.append(nn.ReLU())
+            #layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
             prev_dim = h
 

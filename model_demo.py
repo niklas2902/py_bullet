@@ -9,7 +9,8 @@ import pybullet as p
 import numpy as np
 import tqdm
 
-from model import ImpulsePredictor
+from model import ImpulesePredictor
+from own_physics import calculate_force
 from recorder import record_collision, record_collision_empty
 from scene_creator import create_scene
 
@@ -20,7 +21,7 @@ MAX_RUNS = 20000
 GRAVITY_RUNS = 200
 MAX_FRAMES = 20000
 
-impulse_model = ImpulsePredictor(19)
+impulse_model = ImpulesePredictor(19)
 impulse_model.load_state_dict(torch.load("best_impulse_model.pth", map_location="cpu"))
 impulse_model.eval()
 
@@ -37,7 +38,7 @@ def apply_force(contact_points,
 
 
 def apply_spring_force(cp, cube_id, current_linear_vel):
-    force_vector = calculate_force(cp[8], cp[7], cube_id, current_linear_vel)
+    force_vector = calculate_force(cp, cube_id, current_linear_vel)
 
     p.applyExternalForce(cube_id, -1, force_vector.tolist(), cp[5], p.WORLD_FRAME)
 
@@ -51,45 +52,32 @@ def apply_impulse_predictor(cube_id, current_linear_vel, contact_points):
         features.extend([pen, normal[0], normal[1], normal[2]])
 
     for i in range(len(contact_points), 4):
-        features.extend([0,0,0,0])
+        features.extend([0, 0, 0, 0])
 
+    impulse_model.eval()  # ADD THIS - important!
     with torch.no_grad():
-        feature_tensor = torch.tensor(features[:])
+        feature_tensor = torch.FloatTensor(features)
+
+        # FIX: Add batch dimension!
+        feature_tensor = feature_tensor.unsqueeze(0)  # Shape: [1, 19]
+
         forces = impulse_model(feature_tensor)
 
+        # FIX: Remove batch dimension from output
+        forces = forces.squeeze(0)  # Shape: [12] instead of [1, 12]
+
     for index, cp in enumerate(contact_points):
-        force = forces[index*3:index*3+3]
+        force = forces[index * 3:index * 3 + 3]
         print(f"--------------Contact Point {index}----------------")
         print(f"penetration: {cp[8]} | normal: {cp[7]} | linear velocity: {current_linear_vel}")
         print(f"feature tensor: {feature_tensor}")
         print(f"features in list: {features}")
         print(f"force:{force}")
-        print(f"calculated:{calculate_force(features[3+index*4], feature_tensor[3+index * 4+1: 3+ index*4 +4], cube_id, current_linear_vel)}")
-        print(f"Real calculated:{calculate_force(cp[8], cp[7], cube_id, current_linear_vel)}")
-        apply_spring_force(cp, cube_id, current_linear_vel)
-        #p.applyExternalForce(cube_id, -1, force.tolist(), cp[5], p.WORLD_FRAME)
+        print(f"calculated:{calculate_force(cp, cube_id, current_linear_vel)}")
+        #apply_spring_force(cp, cube_id, current_linear_vel)
+        p.applyExternalForce(cube_id, -1, force.tolist(), cp[5], p.WORLD_FRAME)
 
     print("-----------------------------------")
-
-
-
-def calculate_force(penetration, normal, cube_id, current_linear_vel) -> np.ndarray[Any, np.dtype[Any]] | Any:
-    mass = p.getDynamicsInfo(cube_id, -1)[0]
-    k = SPRING_CONSTANT
-    c = 2 * math.sqrt(k * mass) * BOUNCINESS_FACTOR  # critical damping
-
-    v = np.array(current_linear_vel)
-    n = np.array(normal)
-
-    vel_normal = np.dot(v, n)
-
-    spring_force = -k * penetration
-    damping_force = -c * vel_normal
-
-    force_mag = spring_force + damping_force
-
-    force_vector = force_mag * n
-    return force_vector
 
 def main():
     # Connect to PyBullet
