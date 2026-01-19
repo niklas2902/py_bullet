@@ -21,10 +21,6 @@ MAX_RUNS = 20000
 GRAVITY_RUNS = 200
 MAX_FRAMES = 20000
 
-impulse_model = ImpulesePredictor(19)
-impulse_model.load_state_dict(torch.load("best_impulse_model.pth", map_location="cpu"))
-impulse_model.eval()
-
 def apply_force(contact_points,
                 current_angular_vel, current_linear_vel,
                 model,
@@ -37,8 +33,8 @@ def apply_force(contact_points,
             apply_spring_force(cp, cube_id, current_linear_vel)
 
 
-def apply_spring_force(cp, cube_id, current_linear_vel):
-    force_vector = calculate_force(cp, cube_id, current_linear_vel)
+def apply_spring_force(normal, penetration, cp, cube_id, current_linear_vel):
+    force_vector = calculate_force(normal, penetration, cube_id, current_linear_vel)
 
     p.applyExternalForce(cube_id, -1, force_vector.tolist(), cp[5], p.WORLD_FRAME)
 
@@ -51,31 +47,10 @@ def apply_impulse_predictor(cube_id, current_linear_vel, contact_points):
         normal = cp[7]
         features.extend([pen, normal[0], normal[1], normal[2]])
 
+        apply_spring_force(normal, pen, cp, cube_id, current_linear_vel)
+
     for i in range(len(contact_points), 4):
         features.extend([0, 0, 0, 0])
-
-    impulse_model.eval()  # ADD THIS - important!
-    with torch.no_grad():
-        feature_tensor = torch.FloatTensor(features)
-
-        # FIX: Add batch dimension!
-        feature_tensor = feature_tensor.unsqueeze(0)  # Shape: [1, 19]
-
-        forces = impulse_model(feature_tensor)
-
-        # FIX: Remove batch dimension from output
-        forces = forces.squeeze(0)  # Shape: [12] instead of [1, 12]
-
-    for index, cp in enumerate(contact_points):
-        force = forces[index * 3:index * 3 + 3]
-        print(f"--------------Contact Point {index}----------------")
-        print(f"penetration: {cp[8]} | normal: {cp[7]} | linear velocity: {current_linear_vel}")
-        print(f"feature tensor: {feature_tensor}")
-        print(f"features in list: {features}")
-        print(f"force:{force}")
-        print(f"calculated:{calculate_force(cp, cube_id, current_linear_vel)}")
-        #apply_spring_force(cp, cube_id, current_linear_vel)
-        p.applyExternalForce(cube_id, -1, force.tolist(), cp[5], p.WORLD_FRAME)
 
     print("-----------------------------------")
 

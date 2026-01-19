@@ -27,22 +27,22 @@ def apply_force(contact_points,
                  timestep: float):
 
         for cp in contact_points:
-            apply_spring_force(cp, cube_id, current_linear_vel)
+            apply_spring_force(cp[7], cp[8], cp[5], cube_id, current_linear_vel)
 
 
-def apply_spring_force(cp, cube_id, current_linear_vel):
-    force_vector = calculate_force(cp, cube_id, current_linear_vel)
+def apply_spring_force(normal, penetration,position, cube_id, current_linear_vel):
+    force_vector = calculate_force(normal, penetration, cube_id, current_linear_vel)
 
-    p.applyExternalForce(cube_id, -1, force_vector.tolist(), cp[5], p.WORLD_FRAME)
+    p.applyExternalForce(cube_id, -1, force_vector.tolist(), position, p.WORLD_FRAME)
 
 
-def calculate_force(cp, cube_id, current_linear_vel) -> np.ndarray[Any, np.dtype[Any]] | Any:
+def calculate_force(normal, penetration, cube_id, current_linear_vel) -> np.ndarray[Any, np.dtype[Any]] | Any:
     mass = p.getDynamicsInfo(cube_id, -1)[0]
     k = SPRING_CONSTANT
     c = 2 * math.sqrt(k * mass) * BOUNCINESS_FACTOR  # critical damping
 
-    penetration = cp[8]
-    normal = cp[7]
+    penetration = penetration
+    normal = normal
 
     v = np.array(current_linear_vel)
     n = np.array(normal)
