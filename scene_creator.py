@@ -4,6 +4,8 @@ from typing import Any
 
 import pybullet_data
 
+from utils import get_global_vertex_positions
+
 
 def create_scene(p, should_use_gravity: bool = False) -> Any:
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -34,13 +36,20 @@ def create_scene(p, should_use_gravity: bool = False) -> Any:
         rgbaColor=[0.8, 0.2, 0.2, 1]
     )
 
+
     cube_id = p.createMultiBody(
         baseMass=1.0,
         baseCollisionShapeIndex=col_id,
         baseVisualShapeIndex=vis_id,
-        basePosition=[0, 0, 2.0],
+        basePosition=[0, 0, 0.5],
         baseOrientation=random_quaternion()
     )
+
+    global_vertex_positions = get_global_vertex_positions(cube_id)
+    min_z = get_min_z(global_vertex_positions)
+    pos, orn = p.getBasePositionAndOrientation(cube_id)
+    p.resetBasePositionAndOrientation(cube_id, [pos[0], pos[1], pos[2] + min_z], orn)
+
 
     # Make cube bouncy
     p.changeDynamics(cube_id, -1, restitution=0.5)
@@ -57,13 +66,19 @@ def create_scene(p, should_use_gravity: bool = False) -> Any:
 
     # Give initial downward velocity (since gravity is off)
     p.resetBaseVelocity(cube_id,
-                        linearVelocity=[random.uniform(-10, 10), random.uniform(-10, 10), random.uniform(-10, -1)],
+                        linearVelocity=[random.uniform(-10, 10), random.uniform(-10, 10), random.uniform(-10, 0)],
                         angularVelocity=random_angular_velocity())
 
     timestep = 1.0 / 240
     p.setTimeStep(timestep)
     return plane_id, cube_id, timestep
 
+
+def get_min_z(global_vertex_positions):
+    z = 999
+    for vertex in global_vertex_positions:
+        z = min(z, vertex[2])
+    return z
 
 def random_angular_velocity(strength=5.0):
     return [

@@ -154,7 +154,6 @@ def main():
         number = torch.round(torch.clamp(pred, min=0, max=4)).item()
 
         contact_points = p.getContactPoints(bodyA=cube_id, bodyB=plane_id)
-        print(f"number: {number}| {len(contact_points)}")
         if number:
             #apply_force(contact_points, current_angular_vel, current_linear_vel,
             #            None, prev_angular_vel, prev_linear_vel, cube_id, plane_id, timestep)

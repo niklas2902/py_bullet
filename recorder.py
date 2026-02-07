@@ -194,6 +194,11 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any], 
             "y": float(sphere_pos[1]),
             "z": float(sphere_pos[2]),
         },
+        "linear_velocity": {
+            "x": float(current_linear_vel[0]),
+            "y": float(current_linear_vel[1]),
+            "z": float(current_linear_vel[2]),
+        },
         "self_rotation": {
             "qx": float(sphere_quat[0]),
             "qy": float(sphere_quat[1]),
@@ -283,7 +288,7 @@ def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points
         "x": float(plane_pos[0]),
         "y": float(plane_pos[1]),
         "z": float(plane_pos[2])
-    },
+    }
     collision_point_entry["self_rotation"] = {
         "x": float(quat[0]),
         "y": float(quat[1]),
@@ -294,7 +299,12 @@ def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points
         "x": float(plane_quat[0]),
         "y": float(plane_quat[1]),
         "z": float(quaternion_to_euler(p, plane_quat))
-    },
+    }
+    collision_point_entry["linear_velocity"] = {
+        "x": 0,
+        "y": 0,
+        "z": 0
+    }
 
     collision_point_entry["points"] = []
     empty_collision_points.append(collision_point_entry)

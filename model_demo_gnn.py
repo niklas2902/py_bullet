@@ -1,0 +1,212 @@
+import json
+import random
+import time
+from pyexpat import features
+from typing import Any
+
+import torch
+import math
+import pybullet as p
+import numpy as np
+import tqdm
+
+from model import ImpulesePredictor, NumberContactPointsPredictor, ContactPointsPredictor, CollisionPredictor, \
+    CollisionPredictorGNN
+from own_physics import calculate_force
+from recorder import record_collision, record_collision_empty
+from scene_creator import create_scene
+import time
+
+SPRING_CONSTANT = 1000  # N/m
+DAMPENING = 0.9
+BOUNCINESS_FACTOR = 0.3
+MAX_RUNS = 60000
+GRAVITY_RUNS = 200
+MAX_FRAMES = 5000
+
+all_impulse_predictor = CollisionPredictorGNN(
+    ) # Specify input dimension
+checkpoint = torch.load("all_impulse_model_backup.pth", map_location="cpu")
+all_impulse_predictor.load_state_dict(checkpoint['model_state_dict'])
+all_impulse_predictor.eval()  # Set to evaluation mode
+
+# Extract normalization stats
+feature_stats = checkpoint.get('feature_stats')
+target_stats = checkpoint.get('target_stats')
+
+
+def apply_force(contact_points,
+                current_angular_vel, current_linear_vel,
+                model,
+                prev_angular_vel, prev_linear_vel,
+                cube_id,
+                plane_id,
+                timestep: float):
+    for cp in contact_points:
+        apply_spring_force(cp, cube_id, current_linear_vel)
+
+
+def apply_spring_force(normal, penetration, cp, cube_id, current_linear_vel):
+    force_vector = calculate_force(normal, penetration, cube_id, current_linear_vel)
+
+    p.applyExternalForce(cube_id, -1, force_vector.tolist(), cp[5], p.WORLD_FRAME)
+
+
+def apply_impulse_predictor(cube_id, current_linear_vel, relative_pos, relative_rot):
+    start = time.time()
+    # Extract features for contact points predictor
+    features = []
+    features.extend(current_linear_vel)  # 3 values
+    features.extend([0,0,relative_pos[2]])  # 3 values
+    features.extend(relative_rot)  # 3 values (roll, pitch, yaw)
+
+    # Convert to tensor
+    features_tensor = torch.FloatTensor(features).unsqueeze(0)  # Shape: (1, 9)
+
+    # Normalize using saved statistics
+    if feature_stats is not None:
+        feature_mean = feature_stats['mean']
+        feature_std = feature_stats['std']
+        features_tensor = (features_tensor - feature_mean) / feature_std
+
+    # Get predictions from the model
+    with torch.no_grad():
+        predictions = all_impulse_predictor(features_tensor)
+    # Extract the three outputs
+    num_contacts = predictions["num_contacts"].squeeze(0)  # Shape: (1,)
+    contact_points = predictions["contact_points"].squeeze(0)  # Shape: (12,)
+    impulses = predictions["impulses"].squeeze(0)  # Shape: (12,)
+
+    # Denormalize num_contacts (was normalized to [0,1] by dividing by 4)
+    num_contacts_pred = int(torch.clamp(num_contacts * 4.0, min=0, max=4).item())
+
+    # Denormalize contact points and impulses using target_stats
+    if target_stats is not None:
+        # Reshape to (1, 12) for denormalization function compatibility
+        contact_points_denorm = contact_points.unsqueeze(0)  # (1, 12)
+        impulses_denorm = impulses.unsqueeze(0)  # (1, 12)
+
+        # Denormalize (returns shape (1, 12))
+        cp_denorm = contact_points_denorm.view(1, 4, 3)
+        imp_denorm = impulses_denorm.view(1, 4, 3)
+
+        # Apply inverse normalization
+        for i in range(3):
+            cp_denorm[:, :, i] = cp_denorm[:, :, i] * target_stats["cp_std"][i] + target_stats["cp_mean"][i]
+            imp_denorm[:, :, i] = imp_denorm[:, :, i] * target_stats["imp_std"][i] + target_stats["imp_mean"][i]
+
+        contact_points = cp_denorm.view(12).numpy()
+        impulses = imp_denorm.view(12).numpy()
+    else:
+        contact_points = contact_points.numpy()
+        impulses = impulses.numpy()
+
+    #print(f"Predicted number of contacts: {num_contacts_pred}")
+    #print(f"Contact points shape: {contact_points.shape}")
+    #print(f"Impulses shape: {impulses.shape}")
+    print(f"time: {time.time() - start}")
+
+    # Apply forces at predicted contact points
+    for index in range(num_contacts_pred):
+        predicted_point = contact_points[index * 3: (index + 1) * 3] + np.array(relative_pos)
+        predicted_force = impulses[index * 3: (index + 1) * 3]
+
+        print(f"  Point {index}: position={predicted_point}, force={predicted_force}")
+
+        p.applyExternalForce(
+            cube_id,
+            -1,
+            predicted_force.tolist(),
+            predicted_point.tolist(),
+            p.WORLD_FRAME
+        )
+
+
+def main():
+    # Connect to PyBullet
+    physics_client = p.connect(p.GUI)
+    # Check connection type
+    connection_type = p.getConnectionInfo(physics_client)['connectionMethod']
+
+    frame = 0
+    plane_id, cube_id, timestep = create_scene(p, True)
+
+    log_id = p.startStateLogging(
+        p.STATE_LOGGING_VIDEO_MP4,
+        "collision_run.mp4"
+    )
+
+    # Disable ALL collisions for plane
+    p.setCollisionFilterGroupMask(
+        plane_id, -1,
+        collisionFilterGroup=1,
+        collisionFilterMask=0
+    )
+
+    # Disable ALL collisions for cube
+    p.setCollisionFilterGroupMask(
+        cube_id, -1,
+        collisionFilterGroup=1,
+        collisionFilterMask=0
+    )
+    p.resetBaseVelocity(
+        cube_id,
+        linearVelocity=[0, 0, 0],  # Forward velocity in x-direction
+        angularVelocity=[0, 0, 0]  # No rotation
+    )
+    initial_orientation = p.getQuaternionFromEuler([0.0, 0.5, 0.0])
+
+    p.resetBasePositionAndOrientation(
+        cube_id,
+        p.getBasePositionAndOrientation(cube_id)[0],
+        initial_orientation
+    )
+
+    prev_linear_vel = [0, 0, 0]
+    prev_angular_vel = [0, 0, 0]
+
+    while frame < MAX_FRAMES:
+        start_time = time.time() * 1000
+        # Store velocities before simulation step
+        current_linear_vel, current_angular_vel = p.getBaseVelocity(cube_id)
+
+        # Get positions and orientations
+        plane_pos, plane_orn = p.getBasePositionAndOrientation(plane_id)
+        cube_pos, cube_orn = p.getBasePositionAndOrientation(cube_id)
+
+        # Convert to numpy
+        plane_pos = np.array(plane_pos)
+        cube_pos = np.array(cube_pos)
+
+        # Get relative position in plane's frame
+        plane_rot_matrix = np.array(p.getMatrixFromQuaternion(plane_orn)).reshape(3, 3)
+        relative_pos = plane_rot_matrix.T @ (cube_pos - plane_pos)
+
+        # Get relative rotation
+        plane_orn_inv = p.invertTransform([0, 0, 0], plane_orn)[1]
+        relative_quat = p.multiplyTransforms([0, 0, 0], plane_orn_inv,
+                                             [0, 0, 0], cube_orn)[1]
+        relative_euler = p.getEulerFromQuaternion(relative_quat)
+
+        # Apply predicted forces BEFORE stepping simulation
+        apply_impulse_predictor(cube_id, current_linear_vel, relative_pos, relative_euler)
+
+        # Step simulation
+        p.stepSimulation()
+
+        # DEBUG: Check velocity after stepping
+        vel_after, _ = p.getBaseVelocity(cube_id)
+
+        # Update previous velocities
+        prev_linear_vel = current_linear_vel
+        prev_angular_vel = current_angular_vel
+
+        frame += 1
+        if connection_type == p.GUI:
+            time.sleep(timestep - (min(0,time.time() * 1000 - start_time)))
+    p.stopStateLogging(log_id)
+    p.disconnect()
+
+
+if __name__ == "__main__":
+    main()

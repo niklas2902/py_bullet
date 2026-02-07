@@ -14,10 +14,10 @@ from scene_creator import create_scene
 SPRING_CONSTANT = 1000 #N/m
 DAMPENING = 0.9
 BOUNCINESS_FACTOR = 0.3
-MAX_RUNS = 1000
-GRAVITY_RUNS = 200
-MAX_FRAMES_GRAVITY = 10
-MAX_FRAMES_NORMAL = 200
+MAX_RUNS = 40000
+GRAVITY_RUNS = 0
+MAX_FRAMES_GRAVITY = 0
+MAX_FRAMES_NORMAL = 500
 def apply_force(contact_points,
                 current_angular_vel, current_linear_vel,
                 model,
@@ -58,7 +58,7 @@ def calculate_force(normal, penetration, cube_id, current_linear_vel) -> np.ndar
     return force_vector
 
 
-def main(should_use_gravity:bool):
+def main(should_use_gravity:bool, max_frames:int):
     # Connect to PyBullet
     physics_client = p.connect(p.DIRECT)
     # Check connection type
@@ -71,11 +71,11 @@ def main(should_use_gravity:bool):
     prev_linear_vel = [0, 0, 0]
     prev_angular_vel = [0, 0, 0]
 
-    current_linear_vel = [0,0,0]
-    current_angular_vel = [0,0,0]
-
     plane_id,  cube_id, timestep = create_scene(p, should_use_gravity)
-    max_frames = MAX_FRAMES_GRAVITY if should_use_gravity else MAX_FRAMES_NORMAL
+
+    if should_use_gravity:
+        pos, orn = p.getBasePositionAndOrientation(cube_id)
+        p.resetBasePositionAndOrientation(cube_id, [pos[0], pos[1], random.random() * 4 + 1], orn)
     while frame < max_frames:
         # Store velocities before simulation step
         current_linear_vel, current_angular_vel = p.getBaseVelocity(cube_id)
@@ -92,6 +92,8 @@ def main(should_use_gravity:bool):
 
             apply_force(contact_points, current_angular_vel, current_linear_vel,
                         None, prev_angular_vel, prev_linear_vel, cube_id, plane_id, timestep)
+            if not should_use_gravity:
+                break
 
 
         else:
@@ -122,5 +124,8 @@ def main(should_use_gravity:bool):
 
 if __name__ == "__main__":
     for i in tqdm.tqdm(range(MAX_RUNS), "Simulation runs:"):
-        main(MAX_RUNS - i <= GRAVITY_RUNS)
+        main(MAX_RUNS - i <= GRAVITY_RUNS, MAX_FRAMES_NORMAL)
+
+    for i in tqdm.tqdm(range(MAX_RUNS), "GravitySimulation runs:"):
+        main(MAX_RUNS - i <= GRAVITY_RUNS, MAX_FRAMES_GRAVITY)
 
