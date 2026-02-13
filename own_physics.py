@@ -8,13 +8,15 @@ import math
 import pybullet as p
 import numpy as np
 import tqdm
+
+from parameters import SceneParameters
 from recorder import record_collision, record_collision_empty
-from scene_creator import create_scene
+from scene_creator import create_scene, random_rotation_an_position
 
 SPRING_CONSTANT = 1000 #N/m
 DAMPENING = 0.9
 BOUNCINESS_FACTOR = 0.3
-MAX_RUNS = 40000
+MAX_RUNS = 100000
 GRAVITY_RUNS = 0
 MAX_FRAMES_GRAVITY = 0
 MAX_FRAMES_NORMAL = 500
@@ -58,7 +60,7 @@ def calculate_force(normal, penetration, cube_id, current_linear_vel) -> np.ndar
     return force_vector
 
 
-def main(should_use_gravity:bool, max_frames:int):
+def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters):
     # Connect to PyBullet
     physics_client = p.connect(p.DIRECT)
     # Check connection type
@@ -71,7 +73,7 @@ def main(should_use_gravity:bool, max_frames:int):
     prev_linear_vel = [0, 0, 0]
     prev_angular_vel = [0, 0, 0]
 
-    plane_id,  cube_id, timestep = create_scene(p, should_use_gravity)
+    plane_id,  cube_id, timestep = create_scene(p, should_use_gravity, parameters)
 
     if should_use_gravity:
         pos, orn = p.getBasePositionAndOrientation(cube_id)
@@ -97,7 +99,7 @@ def main(should_use_gravity:bool, max_frames:int):
 
 
         else:
-            record_collision_empty(p, plane_id, cube_id, collision_point_data_empty)
+            record_collision_empty(p, plane_id, cube_id, collision_point_data_empty, current_linear_vel)
 
         # Update previous velocities
         prev_linear_vel = current_linear_vel
@@ -123,9 +125,30 @@ def main(should_use_gravity:bool, max_frames:int):
     p.disconnect()
 
 if __name__ == "__main__":
-    for i in tqdm.tqdm(range(MAX_RUNS), "Simulation runs:"):
-        main(MAX_RUNS - i <= GRAVITY_RUNS, MAX_FRAMES_NORMAL)
 
-    for i in tqdm.tqdm(range(MAX_RUNS), "GravitySimulation runs:"):
-        main(MAX_RUNS - i <= GRAVITY_RUNS, MAX_FRAMES_GRAVITY)
+    for x_rot in tqdm.tqdm(range(45), "x"):
+        for y_rot in range(45):
+            for z_rot in range(45):
+                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), 45.,
+                                                               velocity_range=((-10, 10), (-10, 10), (-10, 0)), position_range=(1,1)))
+
+    for x_rot in tqdm.tqdm(range(10), "x"):
+        for y_rot in range(10):
+            for z_rot in range(10):
+                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), 10.,
+                                                               velocity_range=((-10, 10), (-10, 10), (-1, 0)), position_range=(1,1)))
+
+    for x_rot in tqdm.tqdm(range(20), "x"):
+        for y_rot in range(20):
+            for z_rot in range(20):
+                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), 20.,
+                                                               velocity_range=((-10, 10), (-10, 10), (-20, -5)), position_range=(1,1)))
+
+
+    """
+    for x_rot in tqdm.tqdm(range(45), "x"):
+        for y_rot in range(45):
+            for z_rot in range(45):
+                main(False, MAX_FRAMES_NORMAL, [x_rot, y_rot,z_rot], True)
+    """
 

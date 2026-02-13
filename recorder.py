@@ -238,7 +238,7 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any], 
 
     collision_points.append(collision_point_entry)
 
-def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points:list[Any]):
+def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points:list[Any], current_linear_vel:list):
     # Get current state after collision
     pos, quat = p.getBasePositionAndOrientation(cube_id)
 
@@ -301,9 +301,9 @@ def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points
         "z": float(quaternion_to_euler(p, plane_quat))
     }
     collision_point_entry["linear_velocity"] = {
-        "x": 0,
-        "y": 0,
-        "z": 0
+        "x": current_linear_vel[0],
+        "y": current_linear_vel[1],
+        "z": current_linear_vel[2]
     }
 
     collision_point_entry["points"] = []

@@ -4,10 +4,11 @@ from typing import Any
 
 import pybullet_data
 
+from parameters import SceneParameters
 from utils import get_global_vertex_positions
 
 
-def create_scene(p, should_use_gravity: bool = False) -> Any:
+def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters = SceneParameters()) -> Any:
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
     # No gravity
@@ -45,11 +46,7 @@ def create_scene(p, should_use_gravity: bool = False) -> Any:
         baseOrientation=random_quaternion()
     )
 
-    global_vertex_positions = get_global_vertex_positions(cube_id)
-    min_z = get_min_z(global_vertex_positions)
-    pos, orn = p.getBasePositionAndOrientation(cube_id)
-    p.resetBasePositionAndOrientation(cube_id, [pos[0], pos[1], pos[2] + min_z], orn)
-
+    random_rotation_an_position(cube_id, p, parameters)
 
     # Make cube bouncy
     p.changeDynamics(cube_id, -1, restitution=0.5)
@@ -66,12 +63,31 @@ def create_scene(p, should_use_gravity: bool = False) -> Any:
 
     # Give initial downward velocity (since gravity is off)
     p.resetBaseVelocity(cube_id,
-                        linearVelocity=[random.uniform(-10, 10), random.uniform(-10, 10), random.uniform(-10, 0)],
+                        linearVelocity=[random.uniform(parameters.velocity_range[0][0], parameters.velocity_range[0][1]),
+                                        random.uniform(parameters.velocity_range[1][0], parameters.velocity_range[1][1]),
+                                        random.uniform(parameters.velocity_range[2][0], parameters.velocity_range[2][1])],
                         angularVelocity=random_angular_velocity())
 
     timestep = 1.0 / 240
     p.setTimeStep(timestep)
     return plane_id, cube_id, timestep
+
+
+def random_rotation_an_position(cube_id, p, parameters:SceneParameters):
+    if parameters.random_rotation:
+        p.resetBasePositionAndOrientation(cube_id, [0, 0, 1], random_quaternion())
+    else:
+        p.resetBasePositionAndOrientation(cube_id, [0, 0, 1], p.getQuaternionFromEuler([math.radians(parameters.rotation_parts[0] / parameters.rotation_fidelity * 360. ),
+                                                                                          math.radians(parameters.rotation_parts[1] / parameters.rotation_fidelity * 360. ),
+                                                                                          math.radians(parameters.rotation_parts[2] / parameters.rotation_fidelity * 360. )]))
+
+
+    global_vertex_positions = get_global_vertex_positions(cube_id)
+    #min_z = get_min_z(global_vertex_positions)
+    #pos, orn = p.getBasePositionAndOrientation(cube_id)
+    #p.resetBasePositionAndOrientation(cube_id, [pos[0], pos[1], pos[2] + abs(min_z) + random.random()*0.1 + 0.001], orn)
+    #pos, orn = p.getBasePositionAndOrientation(cube_id)
+    #print(f"pos:{pos}")
 
 
 def get_min_z(global_vertex_positions):

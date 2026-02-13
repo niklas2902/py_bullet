@@ -12,8 +12,9 @@ import tqdm
 
 from model import ImpulesePredictor, NumberContactPointsPredictor, ContactPointsPredictor, CollisionPredictor
 from own_physics import calculate_force
+from parameters import SceneParameters
 from recorder import record_collision, record_collision_empty
-from scene_creator import create_scene
+from scene_creator import create_scene, random_quaternion
 import time
 
 SPRING_CONSTANT = 1000  # N/m
@@ -102,10 +103,10 @@ def apply_impulse_predictor(cube_id, current_linear_vel, relative_pos, relative_
     #print(f"Predicted number of contacts: {num_contacts_pred}")
     #print(f"Contact points shape: {contact_points.shape}")
     #print(f"Impulses shape: {impulses.shape}")
-    print(f"time: {time.time() - start}")
 
     # Apply forces at predicted contact points
     for index in range(num_contacts_pred):
+        print(f"current linear velocity: {current_linear_vel}")
         predicted_point = contact_points[index * 3: (index + 1) * 3] + np.array(relative_pos)
         predicted_force = impulses[index * 3: (index + 1) * 3]
 
@@ -127,7 +128,7 @@ def main():
     connection_type = p.getConnectionInfo(physics_client)['connectionMethod']
 
     frame = 0
-    plane_id, cube_id, timestep = create_scene(p, True)
+    plane_id, cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
 
     log_id = p.startStateLogging(
         p.STATE_LOGGING_VIDEO_MP4,
@@ -152,13 +153,9 @@ def main():
         linearVelocity=[0, 0, 0],  # Forward velocity in x-direction
         angularVelocity=[0, 0, 0]  # No rotation
     )
-    initial_orientation = p.getQuaternionFromEuler([0.0, 0.5, 0.0])
 
-    p.resetBasePositionAndOrientation(
-        cube_id,
-        [0,0,2],
-        initial_orientation
-    )
+    p.resetBasePositionAndOrientation(cube_id, [0, 0, 2], random_quaternion())
+    initial_orientation = p.getQuaternionFromEuler([0.0, 0.5, 0.0])
 
     prev_linear_vel = [0, 0, 0]
     prev_angular_vel = [0, 0, 0]
