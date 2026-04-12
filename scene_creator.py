@@ -74,20 +74,19 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
 
 
 def random_rotation_an_position(cube_id, p, parameters:SceneParameters):
-    if parameters.random_rotation:
-        p.resetBasePositionAndOrientation(cube_id, [0, 0, 1], random_quaternion())
-    else:
-        p.resetBasePositionAndOrientation(cube_id, [0, 0, 1], p.getQuaternionFromEuler([math.radians(parameters.rotation_parts[0] / parameters.rotation_fidelity * 360. ),
-                                                                                          math.radians(parameters.rotation_parts[1] / parameters.rotation_fidelity * 360. ),
-                                                                                          math.radians(parameters.rotation_parts[2] / parameters.rotation_fidelity * 360. )]))
-
-
+    pos, rot = p.getBasePositionAndOrientation(cube_id)
     global_vertex_positions = get_global_vertex_positions(cube_id)
-    #min_z = get_min_z(global_vertex_positions)
-    #pos, orn = p.getBasePositionAndOrientation(cube_id)
-    #p.resetBasePositionAndOrientation(cube_id, [pos[0], pos[1], pos[2] + abs(min_z) + random.random()*0.1 + 0.001], orn)
-    #pos, orn = p.getBasePositionAndOrientation(cube_id)
-    #print(f"pos:{pos}")
+    min_z = get_min_z(global_vertex_positions)
+    z = pos[2]
+
+    min_velocity = min(parameters.velocity_range[2][0], parameters.velocity_range[2][1])
+    if parameters.random_rotation:
+        p.resetBasePositionAndOrientation(cube_id, [0, 0, z -min_z + random.random() * 0.001 + abs(min_velocity / 240) * random.uniform(2,10) + abs(min_velocity / 240) * random.random() + random.uniform(*parameters.position_range)], random_quaternion())
+    else:
+        p.resetBasePositionAndOrientation(cube_id, [0, 0, z -min_z + random.random() * 0.001 + abs(min_velocity / 240) * random.uniform(2,10) + abs(min_velocity / 240) * random.random() + random.uniform(*parameters.position_range)], 
+                                          p.getQuaternionFromEuler([math.radians(parameters.rotation_parts[0] / parameters.rotation_fidelity * 360. + parameters.offset ),
+                                                                                          math.radians(parameters.rotation_parts[1] / parameters.rotation_fidelity * 360. + parameters.offset ),
+                                                                                          math.radians(parameters.rotation_parts[2] / parameters.rotation_fidelity * 360. + parameters.offset)]))
 
 
 def get_min_z(global_vertex_positions):

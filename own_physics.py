@@ -15,7 +15,7 @@ from scene_creator import create_scene, random_rotation_an_position
 
 SPRING_CONSTANT = 1000 #N/m
 DAMPENING = 0.9
-BOUNCINESS_FACTOR = 0.3
+BOUNCINESS_FACTOR = 0.5
 MAX_RUNS = 100000
 GRAVITY_RUNS = 0
 MAX_FRAMES_GRAVITY = 0
@@ -41,24 +41,94 @@ def apply_spring_force(normal, penetration,position, cube_id, current_linear_vel
 def calculate_force(normal, penetration, cube_id, current_linear_vel) -> np.ndarray[Any, np.dtype[Any]] | Any:
     mass = p.getDynamicsInfo(cube_id, -1)[0]
     k = SPRING_CONSTANT
-    c = 2 * math.sqrt(k * mass) * BOUNCINESS_FACTOR  # critical damping
+    
+    # Clamp mass to avoid sqrt(0) or sqrt(negative) in damping coefficient
+    mass = max(mass, 1e-6)
+    
+    # Clamp penetration to non-positive values — positive penetration is physically meaningless
+    # and can cause explosive forces if penetration somehow goes positive
+    penetration = min(penetration, 0.0)
+    
+    c = 2.0 * math.sqrt(k * mass) * BOUNCINESS_FACTOR  # critical damping
 
-    penetration = penetration
-    normal = normal
-
-    v = np.array(current_linear_vel)
-    n = np.array(normal)
+    v = np.array(current_linear_vel, dtype=np.float64)
+    n = np.array(normal, dtype=np.float64)
+    
+    # Normalize the contact normal defensively — physics engines can return
+    # slightly non-unit normals, which scales forces incorrectly
+    n_mag = np.linalg.norm(n)
+    if n_mag < 1e-8:
+        return np.zeros(3, dtype=np.float64)  # degenerate normal, no force
+    n = n / n_mag
 
     vel_normal = np.dot(v, n)
-
+    
     spring_force = -k * penetration
     damping_force = -c * vel_normal
-
     force_mag = spring_force + damping_force
-
+    
+    # Prevent damping from reversing the spring force direction entirely —
+    # this can cause objects to be sucked into surfaces
+    if force_mag < 0.0:
+        force_mag = 0.0
+    
     force_vector = force_mag * n
     return force_vector
 
+def empty_collisions(scene_parameters:SceneParameters):
+
+    physics_client = p.connect(p.DIRECT)
+    # Check connection type
+    connection_type = p.getConnectionInfo(physics_client)['connectionMethod']
+    plane_id,  cube_id, timestep = create_scene(p, False, scene_parameters)
+    collision_data_empty = []
+
+    for i in tqdm.tqdm(range(10000), "empty collisions"):
+        simulate_empty_collisions(p, cube_id, plane_id, collision_data_empty)
+
+    with open(f"logs/collision_points_{time.time()}.json", 'w') as f:
+        json.dump(collision_data_empty, f, indent=4)
+    p.disconnect()
+
+
+def simulate_empty_collisions(p, cube_id, plane_id, collision_data_empty):
+    # Connect to PyBullet
+    pos, orn = p.getBasePositionAndOrientation(cube_id)
+    orn = p.getQuaternionFromEuler([
+        random.uniform(0, 2*math.pi),
+        random.uniform(0, 2*math.pi),
+        random.uniform(0, 2*math.pi)
+    ])
+    p.resetBasePositionAndOrientation(cube_id, [pos[0], pos[1], random.uniform(1, 10)], orn)
+
+    p.resetBasePositionAndOrientation(cube_id, pos, orn)
+
+    p.resetBaseVelocity(
+        cube_id,
+        linearVelocity=[
+            random.uniform(-10, 10),
+            random.uniform(-10, 10),
+            random.uniform(0, -10)
+        ],
+        angularVelocity=[
+            random.uniform(-10, 10),
+            random.uniform(-10, 10),
+            random.uniform(-10, 10)
+        ])
+    frame = 0
+
+    collision_data_empty = []
+    while frame < 2:
+        # Store velocities before simulation step
+        current_linear_vel, current_angular_vel = p.getBaseVelocity(cube_id)
+
+        # Step simulation
+        p.stepSimulation()
+
+
+        # Get contact points
+        record_collision_empty(p, plane_id, cube_id, collision_data_empty, current_linear_vel=current_linear_vel)
+        frame += 1
 
 def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters):
     # Connect to PyBullet
@@ -126,24 +196,53 @@ def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters):
 
 if __name__ == "__main__":
 
-    for x_rot in tqdm.tqdm(range(45), "x"):
-        for y_rot in range(45):
-            for z_rot in range(45):
-                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), 45.,
-                                                               velocity_range=((-10, 10), (-10, 10), (-10, 0)), position_range=(1,1)))
+    empty_collisions(SceneParameters(random_rotation = True))
 
-    for x_rot in tqdm.tqdm(range(10), "x"):
-        for y_rot in range(10):
-            for z_rot in range(10):
-                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), 10.,
-                                                               velocity_range=((-10, 10), (-10, 10), (-1, 0)), position_range=(1,1)))
+    sections = 25
+    for x_rot in tqdm.tqdm(range(sections), "x"):
+        for y_rot in range(sections):
+            for z_rot in range(sections):
+                for vel in range(20):
+                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                               velocity_range=((-10, 10), (-10, 10), (-vel * 0.5, -vel * 0.5 +1)), position_range=(0,0), offset = 0))
 
-    for x_rot in tqdm.tqdm(range(20), "x"):
-        for y_rot in range(20):
-            for z_rot in range(20):
-                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), 20.,
-                                                               velocity_range=((-10, 10), (-10, 10), (-20, -5)), position_range=(1,1)))
+    sections = 25
+    for x_rot in tqdm.tqdm(range(sections), "x"):
+        for y_rot in range(sections):
+            for z_rot in range(sections):
+                for vel in range(10):
+                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                               velocity_range=((-10, 10), (-10, 10), (-vel * 0.1-0.01, 0)), position_range=(0,0), offset = 2.5))
+    sections = 25
+    for x_rot in tqdm.tqdm(range(sections), "x"):
+        for y_rot in range(sections):
+            for z_rot in range(sections):
+                for vel in range(-10,0):
+                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                               velocity_range=((-10, 10), (-10, 10), (-vel *0.25, -vel *0.25 - 0.1)), position_range=(0,0), offset = 5))
+    sections = 25
+    for x_rot in tqdm.tqdm(range(sections), "x"):
+        for y_rot in range(sections):
+            for z_rot in range(sections):
+                for vel in range(-20, -5):
+                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                                velocity_range=((-10, 10), (-10, 10), (vel, vel +1)), position_range=(0,0), offset = 7.5))
 
+    sections = 25
+    for x_rot in tqdm.tqdm(range(sections), "x"):
+        for y_rot in range(sections):
+            for z_rot in range(sections):
+                for vel in range(-20, -5):
+                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                                velocity_range=((-10, 10), (-10, 10), (vel / 100., (vel +1) / 1000.)), position_range=(0,0), offset = 8))
+    
+    sections = 10
+    for x_rot in tqdm.tqdm(range(sections), "x"):
+        for y_rot in range(sections):
+            for z_rot in range(sections):
+                for vel in range(20):
+                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                               velocity_range=((-10, 10), (-10, 10), (-vel * 0.5, -vel * 0.5 +1)), position_range=(-vel / 240 * 100,-vel / 240 * 15), offset = 0))
 
     """
     for x_rot in tqdm.tqdm(range(45), "x"):

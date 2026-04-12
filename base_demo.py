@@ -11,12 +11,13 @@ import tqdm
 
 from model import ImpulesePredictor
 from own_physics import calculate_force
+from parameters import SceneParameters
 from recorder import record_collision, record_collision_empty
 from scene_creator import create_scene
 
 SPRING_CONSTANT = 1000 #N/m
 DAMPENING = 0.9
-BOUNCINESS_FACTOR = 0.3
+BOUNCINESS_FACTOR = 0.5
 MAX_RUNS = 20000
 GRAVITY_RUNS = 200
 MAX_FRAMES = 2000
@@ -70,19 +71,19 @@ def main():
     )
 
 
-    plane_id,  cube_id, timestep = create_scene(p, True)
-    p.resetBaseVelocity(
-        cube_id,
-        linearVelocity=[0, 0, 0],
-        angularVelocity=[0, 0, 0]  # No rotation
-    )  # Forward velocity in x-direction
-    initial_orientation = p.getQuaternionFromEuler([0.0, 0.5, 0.0])
+    plane_id,  cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
+    initial_orientation = p.getQuaternionFromEuler([0.0, 0.2, 0.0])
 
     p.resetBasePositionAndOrientation(
         cube_id,
         p.getBasePositionAndOrientation(cube_id)[0],
         initial_orientation
     )
+    p.resetBaseVelocity(
+        cube_id,
+        linearVelocity=[0, 0, 0],
+        angularVelocity=[0, 0, 0]  # No rotation
+    )  # Forward velocity in x-direction
 
 
     while frame < MAX_FRAMES:

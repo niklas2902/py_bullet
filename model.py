@@ -74,59 +74,64 @@ class ImpulesePredictor(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+import torch
+import torch.nn as nn
+
 
 class CollisionPredictor(nn.Module):
-    def __init__(
-        self,
-        input_dim=15,          # 6 + 9
-        shared_dims=(640, 512, 384,  256),
-        dropout=0.1,
-    ):
+    def __init__(self, input_dim=15, max_contacts=4, hidden_dim=512, dropout=0.025):
         super().__init__()
+        self._C = max_contacts
 
-        # ---------------------------
-        # Shared encoder
-        # ---------------------------
-        layers = []
-        prev_dim = input_dim
-
-        for h in shared_dims:
-            layers.append(nn.Linear(prev_dim, h))
-            layers.append(nn.SiLU())
-            layers.append(nn.Dropout(dropout))
-            prev_dim = h
-
-        self.encoder = nn.Sequential(*layers)
-
-        # ---------------------------
-        # Fused prediction head
-        # ---------------------------
-        # Output: 1 (num_contacts) + 12 (contact_points) + 12 (impulses) = 25
-        self.prediction_head = nn.Sequential(
-            nn.Linear(prev_dim, 128),
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(128, 25)
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, hidden_dim // 4),
+            nn.GELU(),
+        )
+
+        latent_dim = hidden_dim // 4  # 128
+
+        self.count_head = nn.Sequential(
+            nn.Linear(latent_dim, latent_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(latent_dim // 2, max_contacts + 1),
+        )
+
+        self.contact_head = nn.Sequential(
+            nn.Linear(latent_dim, latent_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(latent_dim // 2, latent_dim // 4),
+            nn.GELU(),
+            nn.Linear(latent_dim // 4, max_contacts * 3),
+        )
+
+        self.impulse_head = nn.Sequential(
+            nn.Linear(latent_dim, latent_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(latent_dim // 2, latent_dim // 4),
+            nn.GELU(),
+            nn.Linear(latent_dim // 4, max_contacts * 3),
         )
 
     def forward(self, x):
-        """
-        x: (B, 15)
-        """
-        features = self.encoder(x)
-        predictions = self.prediction_head(features)
+        B = x.shape[0]
+        C = self._C
 
-        # Split the fused output into separate components
-        num_contacts = predictions[:, :1]
-        contact_points = predictions[:, 1:13]
-        impulses = predictions[:, 13:25]
+        feat = self.encoder(x)
 
         return {
-            "num_contacts": num_contacts,
-            "contact_points": contact_points,
-            "impulses": impulses,
+            "num_contacts": self.count_head(feat),
+            "contact_points": self.contact_head(feat).view(B, C, 3),
+            "impulses": self.impulse_head(feat).view(B, C, 3),
         }
-
-
 class EdgeConvBlock(nn.Module):
     def __init__(self, hidden_dim, dropout):
         super().__init__()

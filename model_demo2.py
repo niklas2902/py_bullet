@@ -24,7 +24,9 @@ MAX_RUNS = 60000
 GRAVITY_RUNS = 200
 MAX_FRAMES = 20000
 
-all_impulse_predictor = CollisionPredictor(input_dim=9)  # Specify input dimension
+all_impulse_predictor = CollisionPredictor(
+    input_dim=9,
+)
 checkpoint = torch.load("all_impulse_model_backup.pth", map_location="cpu")
 all_impulse_predictor.load_state_dict(checkpoint['model_state_dict'])
 all_impulse_predictor.eval()  # Set to evaluation mode
@@ -52,65 +54,38 @@ def apply_spring_force(normal, penetration, cp, cube_id, current_linear_vel):
 
 
 def apply_impulse_predictor(cube_id, current_linear_vel, relative_pos, relative_rot):
-    start = time.time()
-    # Extract features for contact points predictor
     features = []
-    features.extend(current_linear_vel)  # 3 values
-    features.extend([0,0,relative_pos[2]])  # 3 values
-    features.extend(relative_rot)  # 3 values (roll, pitch, yaw)
+    features.extend(current_linear_vel)          # 3 values
+    features.extend([0, 0, relative_pos[2]])     # 3 values
+    features.extend(relative_rot)               # 3 values (roll, pitch, yaw)
 
-    # Convert to tensor
-    features_tensor = torch.FloatTensor(features).unsqueeze(0)  # Shape: (1, 9)
+    features_tensor = torch.FloatTensor(features).unsqueeze(0)  # (1, 9)
 
-    # Normalize using saved statistics
     if feature_stats is not None:
-        feature_mean = feature_stats['mean']
-        feature_std = feature_stats['std']
-        features_tensor = (features_tensor - feature_mean) / feature_std
+        features_tensor = (features_tensor - feature_stats['mean']) / feature_stats['std']
 
-    # Get predictions from the model
     with torch.no_grad():
         predictions = all_impulse_predictor(features_tensor)
-    # Extract the three outputs
-    num_contacts = predictions["num_contacts"].squeeze(0)  # Shape: (1,)
-    contact_points = predictions["contact_points"].squeeze(0)  # Shape: (12,)
-    impulses = predictions["impulses"].squeeze(0)  # Shape: (12,)
 
-    # Denormalize num_contacts (was normalized to [0,1] by dividing by 4)
-    num_contacts_pred = int(torch.clamp(num_contacts * 4.0, min=0, max=4).item())
+    # NEW: num_contacts is now class logits [B, max_contacts+1], use argmax
+    num_contacts_pred = predictions["num_contacts"].argmax(dim=-1).item()  # scalar int
 
-    # Denormalize contact points and impulses using target_stats
+    # NEW: contact_points and impulses are already [B, C, 3]
+    contact_points = predictions["contact_points"].squeeze(0)  # (4, 3)
+    impulses = predictions["impulses"].squeeze(0)              # (4, 3)
+
+    # Denormalize using target_stats (same as before, adjusted for new shape)
     if target_stats is not None:
-        # Reshape to (1, 12) for denormalization function compatibility
-        contact_points_denorm = contact_points.unsqueeze(0)  # (1, 12)
-        impulses_denorm = impulses.unsqueeze(0)  # (1, 12)
-
-        # Denormalize (returns shape (1, 12))
-        cp_denorm = contact_points_denorm.view(1, 4, 3)
-        imp_denorm = impulses_denorm.view(1, 4, 3)
-
-        # Apply inverse normalization
         for i in range(3):
-            cp_denorm[:, :, i] = cp_denorm[:, :, i] * target_stats["cp_std"][i] + target_stats["cp_mean"][i]
-            imp_denorm[:, :, i] = imp_denorm[:, :, i] * target_stats["imp_std"][i] + target_stats["imp_mean"][i]
+            contact_points[:, i] = contact_points[:, i] * target_stats["cp_std"][i] + target_stats["cp_mean"][i]
+            impulses[:, i]       = impulses[:, i]       * target_stats["imp_std"][i] + target_stats["imp_mean"][i]
 
-        contact_points = cp_denorm.view(12).numpy()
-        impulses = imp_denorm.view(12).numpy()
-    else:
-        contact_points = contact_points.numpy()
-        impulses = impulses.numpy()
+    contact_points = contact_points.numpy()
+    impulses = impulses.numpy()
 
-    #print(f"Predicted number of contacts: {num_contacts_pred}")
-    #print(f"Contact points shape: {contact_points.shape}")
-    #print(f"Impulses shape: {impulses.shape}")
-
-    # Apply forces at predicted contact points
     for index in range(num_contacts_pred):
-        print(f"current linear velocity: {current_linear_vel}")
-        predicted_point = contact_points[index * 3: (index + 1) * 3] + np.array(relative_pos)
-        predicted_force = impulses[index * 3: (index + 1) * 3]
-
-        print(f"  Point {index}: position={predicted_point}, force={predicted_force}")
+        predicted_point = contact_points[index] + np.array(relative_pos)
+        predicted_force = impulses[index]
 
         p.applyExternalForce(
             cube_id,
@@ -119,7 +94,6 @@ def apply_impulse_predictor(cube_id, current_linear_vel, relative_pos, relative_
             predicted_point.tolist(),
             p.WORLD_FRAME
         )
-
 
 def main():
     # Connect to PyBullet
