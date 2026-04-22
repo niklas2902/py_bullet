@@ -24,7 +24,7 @@ MAX_RUNS = 60000
 GRAVITY_RUNS = 200
 MAX_FRAMES = 2000
 
-all_impulse_predictor = WrenchPredictor(input_dim=10)
+all_impulse_predictor = WrenchPredictor(input_dim=10, width=128)
 checkpoint = torch.load("checkpoints/wrench_model_best_phys.pth", map_location="cpu")
 state_dict = {k.removeprefix("_orig_mod."): v for k, v in checkpoint['model_state_dict'].items()}
 all_impulse_predictor.load_state_dict(state_dict)
