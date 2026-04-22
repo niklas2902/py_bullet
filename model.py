@@ -1,321 +1,112 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader, random_split
 
-class NumberContactPointsPredictor(nn.Module):
-    def __init__(self, input_dim=6, output_dim=1,
-                 hidden_dims=[256, 128, 64, 48], dropout=0.1):
+class ResidualBlock(nn.Module):
+    """SiLU-GLU gated FFN with zero-init output (residual branch starts as identity)."""
+    def __init__(self, dim, expansion=4, dropout=0.1):
         super().__init__()
-
-        layers = []
-        prev_dim = input_dim
-
-        for h in hidden_dims:
-            layers.append(nn.Linear(prev_dim, h))
-            layers.append(nn.SiLU())
-            prev_dim = h
-
-        # output layer
-        layers.append(nn.Linear(prev_dim, prev_dim))
-        layers.append(nn.Linear(prev_dim, prev_dim))
-        layers.append(nn.Linear(prev_dim, output_dim))
-
-        self.net = nn.Sequential(*layers)
+        hidden = dim * expansion
+        self.norm = nn.LayerNorm(dim)
+        self.ff1  = nn.Linear(dim, hidden * 2)
+        self.ff2  = nn.Linear(hidden, dim)
+        self.drop_p = dropout
+        nn.init.zeros_(self.ff2.weight)
+        nn.init.zeros_(self.ff2.bias)
 
     def forward(self, x):
-        out = self.net(x)
-        return out
-
-class ContactPointsPredictor(nn.Module):
-    def __init__(self, input_dim=6, output_dim=12,
-                 hidden_dims=[256,128, 64], dropout=0.1):
-        super().__init__()
-
-        layers = []
+        h = self.norm(x)
+        gate, val = self.ff1(h).chunk(2, dim=-1)
+        h = self.ff2(F.dropout(F.silu(gate) * val, self.drop_p, self.training))
+        return x + F.dropout(h, self.drop_p, self.training)
 
 
-        prev_dim = input_dim
-
-        for h in [512, 256, 128, 64]:
-            layers.append(nn.Linear(prev_dim, h))
+def mlp_head(dims, dropout=0.1):
+    layers = []
+    for i in range(len(dims) - 1):
+        layers.append(nn.Linear(dims[i], dims[i + 1]))
+        if i < len(dims) - 2:
+            layers.append(nn.LayerNorm(dims[i + 1]))
             layers.append(nn.GELU())
-            prev_dim = h
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+    return nn.Sequential(*layers)
 
 
-        # output layer
-        layers.append(nn.Linear(prev_dim, prev_dim))
-        layers.append(nn.Linear(prev_dim, prev_dim))
-        layers.append(nn.Linear(prev_dim, output_dim))
+class WrenchPredictor(nn.Module):
+    """Black-box contact-wrench predictor.
 
-        self.net = nn.Sequential(*layers)
+    Architecture:
+        - Input projection + stack of residual SiLU-GLU FFN blocks.
+        - Collision head: scalar logit.
+        - Force head:     3-D body-frame force.
+        - Torque head:    3-D body-frame torque, conditioned on trunk features
+                          concatenated with the predicted force (information
+                          shortcut, not a physics constraint).
 
-    def forward(self, x):
-        return self.net(x)
+    Inputs (10-D):
+        [v_bx, v_by, v_bz, rel_pos_z, R[:,0] (3), R[:,1] (3)]
 
-class ImpulesePredictor(nn.Module):
-    def __init__(self, input_dim=9, output_dim=12,
-                 hidden_dims=[512, 256,128, 64, 48], dropout=0.1):
-        super().__init__()
-
-        layers = []
-        prev_dim = input_dim
-
-        for h in hidden_dims:
-            layers.append(nn.Linear(prev_dim, h))
-            layers.append(nn.SiLU())
-            prev_dim = h
-
-        # output layer
-        layers.append(nn.Linear(prev_dim, prev_dim))
-        layers.append(nn.Linear(prev_dim, prev_dim))
-        layers.append(nn.Linear(prev_dim, output_dim))
-
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.net(x)
-import torch
-import torch.nn as nn
-
-
-class CollisionPredictor(nn.Module):
-    def __init__(self, input_dim=15, max_contacts=4, hidden_dim=512, dropout=0.025):
-        super().__init__()
-        self._C = max_contacts
-
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, hidden_dim // 4),
-            nn.GELU(),
-        )
-
-        latent_dim = hidden_dim // 4  # 128
-
-        self.count_head = nn.Sequential(
-            nn.Linear(latent_dim, latent_dim // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(latent_dim // 2, max_contacts + 1),
-        )
-
-        self.contact_head = nn.Sequential(
-            nn.Linear(latent_dim, latent_dim // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(latent_dim // 2, latent_dim // 4),
-            nn.GELU(),
-            nn.Linear(latent_dim // 4, max_contacts * 3),
-        )
-
-        self.impulse_head = nn.Sequential(
-            nn.Linear(latent_dim, latent_dim // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(latent_dim // 2, latent_dim // 4),
-            nn.GELU(),
-            nn.Linear(latent_dim // 4, max_contacts * 3),
-        )
-
-    def forward(self, x):
-        B = x.shape[0]
-        C = self._C
-
-        feat = self.encoder(x)
-
-        return {
-            "num_contacts": self.count_head(feat),
-            "contact_points": self.contact_head(feat).view(B, C, 3),
-            "impulses": self.impulse_head(feat).view(B, C, 3),
-        }
-class EdgeConvBlock(nn.Module):
-    def __init__(self, hidden_dim, dropout):
-        super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.SiLU(),
-        )
-
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x, edge_index):
-        B, N, H = x.shape
-        src, dst = edge_index
-
-        x_src = x[:, src]
-        x_dst = x[:, dst]
-
-        edge_feat = torch.cat([x_src, x_dst], dim=-1)
-        msg = self.mlp(edge_feat)
-
-        # ----- aggregate (mean + max) -----
-        out = torch.zeros_like(x)
-
-        out.scatter_reduce_(
-            dim=1,
-            index=dst.view(1, -1, 1).expand(B, -1, H),
-            src=msg,
-            reduce="mean",
-            include_self=False,
-        )
-
-        out_max = torch.zeros_like(x)
-        out_max.scatter_reduce_(
-            dim=1,
-            index=dst.view(1, -1, 1).expand(B, -1, H),
-            src=msg,
-            reduce="amax",
-            include_self=False,
-        )
-
-        out = out + out_max
-
-        return self.dropout(out)
-
-
-class EdgeConvGNN(nn.Module):
+    Outputs (body frame, physical units):
+        collision_logit: (B, 1)
+        force:           (B, 3)
+        torque:          (B, 3)
     """
-    Stronger + better regularized EdgeConv GNN for a cube
-    """
-
-    def __init__(self, input_dim, hidden_dim=96, num_layers=3, dropout=0.15):
+    def __init__(self, input_dim=10, width=256, num_blocks=6, dropout=0.1):
         super().__init__()
 
-        edges = [
-            (0, 1), (1, 2), (2, 3), (3, 0),
-            (4, 5), (5, 6), (6, 7), (7, 4),
-            (0, 4), (1, 5), (2, 6), (3, 7),
-        ]
-
-        edge_index = []
-        for i, j in edges:
-            edge_index += [(i, j), (j, i)]
-
-        self.register_buffer(
-            "edge_index",
-            torch.tensor(edge_index, dtype=torch.long).t()
-        )
-
-        # --- identity prior ---
-        self.vertex_embed = nn.Embedding(8, hidden_dim)
-
+        # --- backbone ---
         self.input_proj = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.SiLU(),
+            nn.Linear(input_dim, width),
+            nn.LayerNorm(width),
+            nn.GELU(),
+        )
+        self.backbone = nn.Sequential(
+            *[ResidualBlock(width, dropout=dropout) for _ in range(num_blocks)]
         )
 
-        self.blocks = nn.ModuleList([
-            EdgeConvBlock(hidden_dim, dropout)
-            for _ in range(num_layers)
-        ])
+        # --- heads ---
+        # Collision: scalar logit.
+        self.collision_head = mlp_head([width, 128, 1], dropout)
+        # Force: 3-D regression.
+        self.force_head     = mlp_head([width, 128, 3], dropout)
+        # Torque: reads trunk features + predicted force (width + 3 inputs).
+        self.torque_head    = mlp_head([width + 3, 128, 3], dropout)
 
-        self.output_proj = nn.Linear(hidden_dim, 4)
-
-        self.graph_norm = nn.LayerNorm(hidden_dim)
-
-    def forward(self, global_features):
-        B = global_features.size(0)
-
-        # ----- initial node features -----
-        x = self.input_proj(global_features)        # (B, H)
-        x = x.unsqueeze(1).expand(B, 8, -1)
-
-        # add vertex identity
-        vid = torch.arange(8, device=x.device)
-        x = x + self.vertex_embed(vid)[None, :, :]
-
-        # ----- message passing -----
-        for block in self.blocks:
-            x = x + block(x, self.edge_index)  # residual
-
-        # ----- graph embedding -----
-        graph_emb = self.graph_norm(x.mean(dim=1))
-
-        # ----- contact points -----
-        vertex_out = self.output_proj(x)  # (B, 8, 4)
-        confidence = vertex_out[..., 3]
-
-        _, top_idx = torch.topk(confidence, k=4, dim=1)
-        batch_idx = torch.arange(B, device=x.device)[:, None]
-
-        contact_points = vertex_out[batch_idx, top_idx, :3]
-
-        return contact_points.reshape(B, 12), graph_emb
-
-
-class CollisionPredictorGNN(nn.Module):
-    def __init__(
-        self,
-        input_dim=9,
-        shared_dims=(640, 512, 384, 256),
-        gnn_hidden_dim=64,
-        dropout=0.1,
-    ):
-        super().__init__()
-
-        # ---------------------------
-        # Shared encoder
-        # ---------------------------
-        layers = []
-        prev_dim = input_dim
-        for h in shared_dims:
-            layers += [
-                nn.Linear(prev_dim, h),
-                nn.SiLU(),
-                nn.Dropout(dropout),
-            ]
-            prev_dim = h
-
-        self.encoder = nn.Sequential(*layers)
-
-        # ---------------------------
-        # GNN
-        # ---------------------------
-        self.contact_gnn = EdgeConvGNN(
-            input_dim=prev_dim,
-            hidden_dim=gnn_hidden_dim,
-            dropout=dropout
-        )
-
-        fused_dim = prev_dim + gnn_hidden_dim
-
-        # ---------------------------
-        # Heads (NOW GNN-AWARE)
-        # ---------------------------
-        self.num_contacts_head = nn.Sequential(
-            nn.Linear(fused_dim, 128),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            nn.Linear(128, 1)
-        )
-
-        self.impulse_head = nn.Sequential(
-            nn.Linear(fused_dim, 256),
-            nn.SiLU(),
-            nn.Linear(256, 128),
-            nn.SiLU(),
-            nn.Linear(128, 12)
-        )
+        # Regression heads: small init on the final layer so outputs start near
+        # zero (so training is stable for samples that are actually non-contact).
+        for head in (self.force_head, self.torque_head):
+            nn.init.normal_(head[-1].weight, std=0.01)
+            nn.init.zeros_(head[-1].bias)
+        # Collision head: zero-init so the initial logit is ~0 (p ~= 0.5).
+        nn.init.zeros_(self.collision_head[-1].weight)
+        nn.init.zeros_(self.collision_head[-1].bias)
 
     def forward(self, x):
-        features = self.encoder(x)  # (B, D)
+        h = self.input_proj(x)
+        h = self.backbone(h)
 
-        contact_points, graph_emb = self.contact_gnn(features)
-
-        fused = torch.cat([features, graph_emb], dim=-1)
-
-        num_contacts = self.num_contacts_head(fused)
-        impulses = self.impulse_head(fused)
+        collision_logit = self.collision_head(h)                       # (B, 1)
+        force_vec       = self.force_head(h)                           # (B, 3)
+        torque_vec      = self.torque_head(torch.cat([h, force_vec], dim=-1))  # (B, 3)
 
         return {
-            "num_contacts": num_contacts,
-            "contact_points": contact_points,
-            "impulses": impulses,
+            "collision_logit": collision_logit,
+            "force":           force_vec,
+            "torque":          torque_vec,
         }
+
+
+def make_fast_predictor(input_dim=10, width=256, num_blocks=6, dropout=0.1):
+    model = WrenchPredictor(input_dim=input_dim,
+                            width=width, num_blocks=num_blocks, dropout=dropout)
+    try:
+        compiled = torch.compile(model, mode="default")
+        print("Model successfully compiled for optimised performance.")
+        return compiled
+    except Exception as e:
+        print(f"torch.compile failed: {e}. Returning standard model.")
+        return model

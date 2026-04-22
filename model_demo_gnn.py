@@ -8,7 +8,7 @@ from models.gnn_model import GNNCollisionPredictor, build_cube_edges
 from parameters import SceneParameters
 from scene_creator import create_scene
 
-MAX_FRAMES = 5000
+MAX_FRAMES = 2000
 
 # ------------------------------------------------------------------
 # Load model + stats
@@ -99,16 +99,27 @@ def main():
 
     frame = 0
     
-    plane_id, cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
+    plane_id,  cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
+    initial_orientation = p.getQuaternionFromEuler([0.0, 0.2, 0.0])
 
-    log_id = p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, "collision_run.mp4")
+    p.resetBasePositionAndOrientation(
+        cube_id,
+        p.getBasePositionAndOrientation(cube_id)[0],
+        initial_orientation
+    )
+    p.resetBaseVelocity(
+        cube_id,
+        linearVelocity=[0, 0, 0],
+        angularVelocity=[0, 0, 0]  # No rotation
+    )  # Forward velocity in x-direction
+
+
+    log_id = p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, "collision_run_gnn.mp4")
 
     # Disable collisions (we predict contact forces ourselves)
     p.setCollisionFilterGroupMask(plane_id, -1, collisionFilterGroup=1, collisionFilterMask=0)
     p.setCollisionFilterGroupMask(cube_id, -1, collisionFilterGroup=1, collisionFilterMask=0)
 
-    p.resetBaseVelocity(cube_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-    initial_orientation = p.getQuaternionFromEuler([0.0, 0.5, 0.0])
     p.resetBasePositionAndOrientation(
         cube_id,
         p.getBasePositionAndOrientation(cube_id)[0],

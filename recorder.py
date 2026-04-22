@@ -199,6 +199,11 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any], 
             "y": float(current_linear_vel[1]),
             "z": float(current_linear_vel[2]),
         },
+        "angular_velocity": {
+            "x": float(angular_vel[0]),
+            "y": float(angular_vel[1]),
+            "z": float(angular_vel[2]),
+        },
         "self_rotation": {
             "qx": float(sphere_quat[0]),
             "qy": float(sphere_quat[1]),
@@ -260,6 +265,9 @@ def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points
     relative_euler = p.getEulerFromQuaternion(relative_quat)
 
 
+    _, angular_vel = p.getBaseVelocity(cube_id)
+
+
 
     collision_point_entry["self_position"] = {
         "x": float(pos[0]),
@@ -304,6 +312,11 @@ def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points
         "x": current_linear_vel[0],
         "y": current_linear_vel[1],
         "z": current_linear_vel[2]
+    }
+    collision_point_entry["angular_velocity"] = {
+        "x": angular_vel[0],
+        "y": angular_vel[1],
+        "z": angular_vel[2]
     }
 
     collision_point_entry["points"] = []

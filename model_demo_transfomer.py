@@ -22,7 +22,7 @@ DAMPENING = 0.9
 BOUNCINESS_FACTOR = 0.3
 MAX_RUNS = 60000
 GRAVITY_RUNS = 200
-MAX_FRAMES = 20000
+MAX_FRAMES = 2000
 
 all_impulse_predictor = CollisionPredictorTransformer(input_dim=9)
 checkpoint = torch.load("checkpoints/best_transformer_model.pth", map_location="cpu")
@@ -101,11 +101,24 @@ def main():
     connection_type = p.getConnectionInfo(physics_client)['connectionMethod']
 
     frame = 0
-    plane_id, cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
+    plane_id,  cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
+    initial_orientation = p.getQuaternionFromEuler([0.0, 0.2, 0.0])
+
+    p.resetBasePositionAndOrientation(
+        cube_id,
+        p.getBasePositionAndOrientation(cube_id)[0],
+        initial_orientation
+    )
+    p.resetBaseVelocity(
+        cube_id,
+        linearVelocity=[0, 0, 0],
+        angularVelocity=[0, 0, 0]  # No rotation
+    )  # Forward velocity in x-direction
+
 
     log_id = p.startStateLogging(
         p.STATE_LOGGING_VIDEO_MP4,
-        "collision_run.mp4"
+        "collision_run_transfomer.mp4"
     )
 
     # Disable ALL collisions for plane
@@ -127,11 +140,6 @@ def main():
         angularVelocity=[0, 0, 0]  # No rotation
     )
 
-    p.resetBasePositionAndOrientation(cube_id, [0, 0, 2], random_quaternion())
-    initial_orientation = p.getQuaternionFromEuler([0.0, 0.5, 0.0])
-
-    prev_linear_vel = [0, 0, 0]
-    prev_angular_vel = [0, 0, 0]
 
     while frame < MAX_FRAMES:
         # Store velocities before simulation step

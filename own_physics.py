@@ -1,4 +1,6 @@
 import json
+import multiprocessing
+import os
 import random
 import time
 from typing import Any
@@ -20,6 +22,7 @@ MAX_RUNS = 100000
 GRAVITY_RUNS = 0
 MAX_FRAMES_GRAVITY = 0
 MAX_FRAMES_NORMAL = 500
+MAX_FRAMES_TO_RECORD = 100
 def apply_force(contact_points,
                 current_angular_vel, current_linear_vel,
                 model,
@@ -180,70 +183,78 @@ def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters):
             time.sleep(timestep)
 
     # Save collision data to JSON file
-    with open(f'logs/collision_data-{time.time()}.json', 'w') as f:
-        json.dump(collision_data, f, indent=4)
+    with open(f'logs/collision_data-{time.time()}-{os.getpid()}.json', 'w') as f:
+        random.shuffle(collision_data)
+        json.dump(collision_data[:MAX_FRAMES_TO_RECORD], f, indent=4)
 
-    num_collision_points = len(collision_point_data)
+    num_collision_points = min(MAX_FRAMES_TO_RECORD, len(collision_point_data))
     random.shuffle(collision_point_data_empty)
+    random.shuffle(collision_point_data)
+    collision_point_data = collision_point_data[:MAX_FRAMES_TO_RECORD]
     for i in range(num_collision_points):
         if i < len(collision_point_data_empty):
             collision_point_data.append(collision_point_data_empty[i])
-    with open(f"logs/collision_points_{time.time()}.json", 'w') as f:
+    with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
         json.dump(collision_point_data, f, indent=4)
 
 
     p.disconnect()
 
+
+def simulate_sections(value):
+    x_rot, sections = value
+    print(f"x_rot:", x_rot)
+    for y_rot in range(sections):
+        print(f"{x_rot} - 1. y_rot: {y_rot}")
+        for z_rot in range(sections):
+            for vel in range(20):
+                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                            velocity_range=((-10, 10), (-10, 10), (-vel * 0.5, -vel * 0.5 +1)), position_range=(0,0), offset = 0))
+
+    for y_rot in range(sections):
+        print(f"{x_rot} - 2. y_rot: {y_rot}")
+        for z_rot in range(sections):
+            for vel in range(10):
+                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                            velocity_range=((-10, 10), (-10, 10), (-vel * 0.1-0.01, 0)), position_range=(0,0), offset = 2.5))
+    for y_rot in range(sections):
+        print(f"{x_rot} - 3. y_rot: {y_rot}")
+        for z_rot in range(sections):
+            for vel in range(-10,0):
+                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                            velocity_range=((-10, 10), (-10, 10), (-vel *0.25, -vel *0.25 - 0.1)), position_range=(0,0), offset = 5))
+    for y_rot in range(sections):
+        print(f"{x_rot} - 4. y_rot: {y_rot}")
+        for z_rot in range(sections):
+            for vel in range(-20, -5):
+                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                            velocity_range=((-10, 10), (-10, 10), (vel, vel +1)), position_range=(0,0), offset = 7.5))
+
+    for y_rot in range(sections):
+        print(f"{x_rot} - 5. y_rot: {y_rot}")
+        for z_rot in range(sections):
+            for vel in range(-20, -5):
+                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                            velocity_range=((-10, 10), (-10, 10), (vel / 100., (vel +1) / 1000.)), position_range=(0,0), offset = 8))
+
+    for y_rot in range(sections):
+        print(f"{x_rot} - 6. y_rot: {y_rot}")
+        for z_rot in range(sections):
+            for vel in range(20):
+                main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                            velocity_range=((-10, 10), (-10, 10), (-vel * 0.5, -vel * 0.5 +1)), position_range=(-vel / 240 * 100,-vel / 240 * 15), offset = 0))
+
+    
+
 if __name__ == "__main__":
 
+    pool = multiprocessing.Pool(processes=10)
+    sections = 25
     empty_collisions(SceneParameters(random_rotation = True))
+    for i in tqdm.tqdm(range(1000), "gravity runs"):
+        main(True, 5000, SceneParameters(random_rotation=True))
 
-    sections = 25
-    for x_rot in tqdm.tqdm(range(sections), "x"):
-        for y_rot in range(sections):
-            for z_rot in range(sections):
-                for vel in range(20):
-                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
-                                                               velocity_range=((-10, 10), (-10, 10), (-vel * 0.5, -vel * 0.5 +1)), position_range=(0,0), offset = 0))
-
-    sections = 25
-    for x_rot in tqdm.tqdm(range(sections), "x"):
-        for y_rot in range(sections):
-            for z_rot in range(sections):
-                for vel in range(10):
-                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
-                                                               velocity_range=((-10, 10), (-10, 10), (-vel * 0.1-0.01, 0)), position_range=(0,0), offset = 2.5))
-    sections = 25
-    for x_rot in tqdm.tqdm(range(sections), "x"):
-        for y_rot in range(sections):
-            for z_rot in range(sections):
-                for vel in range(-10,0):
-                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
-                                                               velocity_range=((-10, 10), (-10, 10), (-vel *0.25, -vel *0.25 - 0.1)), position_range=(0,0), offset = 5))
-    sections = 25
-    for x_rot in tqdm.tqdm(range(sections), "x"):
-        for y_rot in range(sections):
-            for z_rot in range(sections):
-                for vel in range(-20, -5):
-                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
-                                                                velocity_range=((-10, 10), (-10, 10), (vel, vel +1)), position_range=(0,0), offset = 7.5))
-
-    sections = 25
-    for x_rot in tqdm.tqdm(range(sections), "x"):
-        for y_rot in range(sections):
-            for z_rot in range(sections):
-                for vel in range(-20, -5):
-                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
-                                                                velocity_range=((-10, 10), (-10, 10), (vel / 100., (vel +1) / 1000.)), position_range=(0,0), offset = 8))
-    
-    sections = 10
-    for x_rot in tqdm.tqdm(range(sections), "x"):
-        for y_rot in range(sections):
-            for z_rot in range(sections):
-                for vel in range(20):
-                    main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
-                                                               velocity_range=((-10, 10), (-10, 10), (-vel * 0.5, -vel * 0.5 +1)), position_range=(-vel / 240 * 100,-vel / 240 * 15), offset = 0))
-
+    ans = pool.map(simulate_sections, [(x_rot, sections) for x_rot in range(sections)])
     """
     for x_rot in tqdm.tqdm(range(45), "x"):
         for y_rot in range(45):
