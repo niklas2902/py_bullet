@@ -38,10 +38,8 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
     )
 
 
-    cube_id = p.createMultiBody(
-        baseMass=1.0,
-        baseCollisionShapeIndex=col_id,
-        baseVisualShapeIndex=vis_id,
+    cube_id = p.loadURDF(
+        "/home/niklas/Dokumente/privat/repositories/py_bullet/blender_models/bunny.urdf",
         basePosition=[0, 0, 0.5],
         baseOrientation=random_quaternion()
     )
@@ -73,20 +71,33 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
     return plane_id, cube_id, timestep
 
 
+def reset_scene(p, cube_id, should_use_gravity: bool, parameters: SceneParameters):
+    if should_use_gravity:
+        p.setGravity(0, 0, -9.81)
+    else:
+        p.setGravity(0, 0, 0)
+    random_rotation_an_position(cube_id, p, parameters)
+    p.resetBaseVelocity(cube_id,
+                        linearVelocity=[random.uniform(parameters.velocity_range[0][0], parameters.velocity_range[0][1]),
+                                        random.uniform(parameters.velocity_range[1][0], parameters.velocity_range[1][1]),
+                                        random.uniform(parameters.velocity_range[2][0], parameters.velocity_range[2][1])],
+                        angularVelocity=random_angular_velocity())
+
+
 def random_rotation_an_position(cube_id, p, parameters:SceneParameters):
     pos, rot = p.getBasePositionAndOrientation(cube_id)
     global_vertex_positions = get_global_vertex_positions(cube_id)
     min_z = get_min_z(global_vertex_positions)
     z = pos[2]
+    new_z = z - min_z + 0.001  # place bottom face just above plane at z=0
 
-    min_velocity = min(parameters.velocity_range[2][0], parameters.velocity_range[2][1])
     if parameters.random_rotation:
-        p.resetBasePositionAndOrientation(cube_id, [0, 0, z -min_z + random.random() * 0.001 + abs(min_velocity / 240) * random.uniform(2,10) + abs(min_velocity / 240) * random.random() + random.uniform(*parameters.position_range)], random_quaternion())
+        p.resetBasePositionAndOrientation(cube_id, [0, 0, new_z], random_quaternion())
     else:
-        p.resetBasePositionAndOrientation(cube_id, [0, 0, z -min_z + random.random() * 0.001 + abs(min_velocity / 240) * random.uniform(2,10) + abs(min_velocity / 240) * random.random() + random.uniform(*parameters.position_range)], 
+        p.resetBasePositionAndOrientation(cube_id, [0, 0, new_z],
                                           p.getQuaternionFromEuler([math.radians(parameters.rotation_parts[0] / parameters.rotation_fidelity * 360. + parameters.offset ),
-                                                                                          math.radians(parameters.rotation_parts[1] / parameters.rotation_fidelity * 360. + parameters.offset ),
-                                                                                          math.radians(parameters.rotation_parts[2] / parameters.rotation_fidelity * 360. + parameters.offset)]))
+                                                                     math.radians(parameters.rotation_parts[1] / parameters.rotation_fidelity * 360. + parameters.offset ),
+                                                                     math.radians(parameters.rotation_parts[2] / parameters.rotation_fidelity * 360. + parameters.offset)]))
 
 
 def get_min_z(global_vertex_positions):

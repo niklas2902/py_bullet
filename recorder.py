@@ -48,7 +48,7 @@ def to_vector(list_vector):
 def record_collision(p, collision_data: list[Any], collision_points: list[Any], contact_points, frame: int, plane_id,
                      prev_angular_vel: list[int] | Any,
                      current_linear_vel: list[int] | Any, sphere_id):
-    from own_physics import calculate_force
+    from own_physics import calculate_force, _contact_point_velocity
 
     # Get global poses (world frame)
     sphere_pos, sphere_quat = p.getBasePositionAndOrientation(sphere_id)
@@ -88,8 +88,8 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any], 
             contact_pos_on_self[2] - sphere_pos[2],
         ]
 
-        # Calculate force at contact point using your external function
-        force = calculate_force(contact_normal, contact[8], sphere_id, current_linear_vel)
+        v_contact = _contact_point_velocity(sphere_id, contact_pos_on_self, current_linear_vel, angular_vel)
+        force = calculate_force(contact_normal, contact[8], sphere_id, v_contact.tolist())
 
         points.append({
             "contact_position_world": {

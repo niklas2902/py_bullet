@@ -1,54 +1,26 @@
-import json
-import random
 import time
-from typing import Any
 
-import torch
-import math
 import pybullet as p
 import numpy as np
-import tqdm
-
-from model import ImpulesePredictor
-from own_physics import calculate_force
 from parameters import SceneParameters
-from recorder import record_collision, record_collision_empty
 from scene_creator import create_scene
+from own_physics import calculate_force, _contact_point_velocity
 
-SPRING_CONSTANT = 1000  # N/m
-DAMPENING = 0.9
-BOUNCINESS_FACTOR = 0.3
-MAX_RUNS = 20000
-GRAVITY_RUNS = 200
 MAX_FRAMES = 2000
 
 
-def apply_force(contact_points,
-                current_angular_vel, current_linear_vel,
-                model,
-                prev_angular_vel, prev_linear_vel,
-                cube_id,
-                plane_id,
-                timestep: float):
-    for cp in contact_points:
-        apply_spring_force(cp, cube_id, current_linear_vel)
-
-
-def apply_spring_force(normal, penetration, cp, cube_id, current_linear_vel):
-    force_vector = calculate_force(normal, penetration, cube_id, current_linear_vel)
-    p.applyExternalForce(cube_id, -1, force_vector.tolist(), cp[5], p.WORLD_FRAME)
-
-
-def apply_impulse_predictor(cube_id, current_linear_vel, contact_points):
-    features = list(current_linear_vel)
-    if len(contact_points) > 4:
-        raise Exception("Too many contact points")
-
-    # Get the cube's center of mass position (world frame) to compute torque arms
+def apply_impulse_predictor(cube_id, current_linear_vel, current_angular_vel, contact_points):
+    """
+    Net-force / net-torque application: sum all contact contributions, then make
+    a single applyExternalForce + applyExternalTorque call.
+    """
     cube_pos, _ = p.getBasePositionAndOrientation(cube_id)
     cube_pos = np.array(cube_pos)
 
-    # Accumulate net force and net torque from all contact points
+    n_contacts = len(contact_points)
+    if n_contacts == 0:
+        return
+
     net_force = np.zeros(3)
     net_torque = np.zeros(3)
 
@@ -56,93 +28,81 @@ def apply_impulse_predictor(cube_id, current_linear_vel, contact_points):
         pen = cp[8]
         normal = cp[7]
         contact_pos_world = np.array(cp[5])
-        features.extend([pen, normal[0], normal[1], normal[2]])
 
-        # Compute the force at this contact point
-        force_vector = calculate_force(normal, pen, cube_id, current_linear_vel)
-        force_vector = np.asarray(force_vector)
+        v_contact = _contact_point_velocity(
+            cube_id, contact_pos_world, current_linear_vel, current_angular_vel
+        )
 
-        # Accumulate force
+        force_vector = np.asarray(calculate_force(normal, pen, cube_id, v_contact.tolist()))
+        force_vector = force_vector / n_contacts
+
         net_force += force_vector
-
-        # Torque = r x F, where r is the lever arm from center of mass to contact point
         r = contact_pos_world - cube_pos
         net_torque += np.cross(r, force_vector)
 
-    for i in range(len(contact_points), 4):
-        features.extend([0, 0, 0, 0])
+    p.applyExternalForce(cube_id, -1, net_force.tolist(), cube_pos.tolist(), p.WORLD_FRAME)
+    p.applyExternalTorque(cube_id, -1, net_torque.tolist(), p.WORLD_FRAME)
 
-    # Apply single net force at the center of mass (no torque from this call since r=0)
-    # and apply the accumulated torque separately
-    if len(contact_points) > 0:
-        p.applyExternalForce(
-            cube_id, -1,
-            net_force.tolist(),
-            cube_pos.tolist(),
-            p.WORLD_FRAME,
-        )
-        p.applyExternalTorque(
-            cube_id, -1,
-            net_torque.tolist(),
-            p.WORLD_FRAME,
-        )
 
-    print("-----------------------------------")
+def _disable_default_contact_response(body_id):
+    """
+    Make PyBullet's built-in contact solver effectively a no-op for this body,
+    so our custom spring force is the only normal response.
+    """
+    for link in range(-1, p.getNumJoints(body_id)):
+        p.changeDynamics(
+            body_id, link,
+            restitution=0.0,
+            lateralFriction=0.0,
+            contactStiffness=1e-9,
+            contactDamping=1e-9,
+        )
 
 
 def main():
-    # Connect to PyBullet
     physics_client = p.connect(p.GUI)
-    # Check connection type
     connection_type = p.getConnectionInfo(physics_client)['connectionMethod']
 
-    frame = 0
-    prev_linear_vel = [0, 0, 0]
-    prev_angular_vel = [0, 0, 0]
+    p.setTimeStep(1.0 / 240.0)
+    p.setPhysicsEngineParameter(numSolverIterations=150)
 
-    log_id = p.startStateLogging(
-        p.STATE_LOGGING_VIDEO_MP4,
-        "collision_run_gt.mp4"
-    )
+    log_id = p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, "collision_run_gt.mp4")
 
-    plane_id, cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
-    p.resetBaseVelocity(
-        cube_id,
-        linearVelocity=[0, 0, 0],
-        angularVelocity=[0, 0, 0]  # No rotation
-    )  # Forward velocity in x-direction
+    plane_id, cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation=True))
+
+    _disable_default_contact_response(cube_id)
+    _disable_default_contact_response(plane_id)
+
+    p.resetBaseVelocity(cube_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
     initial_orientation = p.getQuaternionFromEuler([0.0, 0.5, 0.0])
-
     p.resetBasePositionAndOrientation(
         cube_id,
         p.getBasePositionAndOrientation(cube_id)[0],
-        initial_orientation
+        initial_orientation,
     )
 
+    frame = 0
     while frame < MAX_FRAMES:
-        # Store velocities before simulation step
-        current_linear_vel, current_angular_vel = p.getBaseVelocity(cube_id)
-
-        # Step simulation
         p.stepSimulation()
 
-        # Get contact points
+        current_linear_vel, current_angular_vel = p.getBaseVelocity(cube_id)
         contact_points = p.getContactPoints(bodyA=cube_id, bodyB=plane_id)
+
         if contact_points:
-            # apply_force(contact_points, current_angular_vel, current_linear_vel,
-            #            None, prev_angular_vel, prev_linear_vel, cube_id, plane_id, timestep)
-            apply_impulse_predictor(cube_id, current_linear_vel, contact_points)
+            apply_impulse_predictor(
+                cube_id, current_linear_vel, current_angular_vel, contact_points
+            )
 
-            # DEBUG: Check velocity after applying forces
-            vel_after, _ = p.getBaseVelocity(cube_id)
-
-        # Update previous velocities
-        prev_linear_vel = current_linear_vel
-        prev_angular_vel = current_angular_vel
+        if frame % 30 == 0:
+            pos, _ = p.getBasePositionAndOrientation(cube_id)
+            max_pen = max((c[8] for c in contact_points), default=0.0)
+            print(f"f={frame:4d} z={pos[2]:+.3f} vz={current_linear_vel[2]:+.3f} "
+                  f"n={len(contact_points):2d} pen={max_pen:.4f}")
 
         frame += 1
         if connection_type == p.GUI:
             time.sleep(timestep)
+
     p.stopStateLogging(log_id)
     p.disconnect()
 

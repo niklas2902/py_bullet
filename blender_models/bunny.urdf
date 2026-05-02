@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<robot name="bunny">
+  <!--
+    Dynamic bunny for PyBullet.
+
+    GEOMETRY:
+    Mesh is uniformly scaled by 1/1.6208 ≈ 0.617 so the largest extent is 1 m
+    (matches a unit cube's bbox). The visual/collision <origin> is set to
+    -scale*COM, where COM is the bunny's true volumetric center of mass
+    computed via signed-tetrahedron integration (NOT the bbox center).
+
+      Mesh-local COM: (-0.1960, 0.5863, 0.1937)
+      Bbox center:    (-0.1490, 0.8314, 0.0733)
+
+    MASS: 1 kg (matches a unit cube of unit density).
+
+    INERTIA: True inertia tensor of the bunny shape, computed via the same
+    tetrahedron integration (Mirtich 1996), expressed about the COM, then
+    rescaled so the body has mass=1 kg and the mesh-scale s=0.617 is applied
+    (inertia scales as s^2 at fixed mass). Off-diagonals are non-zero because
+    the bunny's principal axes are not aligned with x/y/z.
+
+    Principal moments: (0.044, 0.082, 0.092) kg·m²
+    Compare unit-cube inertia: 0.167 on the diagonal, zero off-diagonals.
+    The bunny's diagonals are smaller because its mass is more centrally
+    concentrated than a cube with the same bbox.
+
+    COLLISION: bunny_collision.obj — CoACD convex decomposition, 50 hulls.
+  -->
+  <link name="bunny">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.057828" ixy="0.018062" ixz="0.002093"
+               iyy="0.068961" iyz="0.000531"
+               izz="0.091700"/>
+    </inertial>
+
+    <visual>
+      <origin xyz="0.120909 -0.361722 -0.119527" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="bunny.obj" scale="0.6170 0.6170 0.6170"/>
+      </geometry>
+      <material name="bunny_color">
+        <color rgba="0.85 0.75 0.65 1.0"/>
+      </material>
+    </visual>
+
+    <collision>
+      <origin xyz="0.120909 -0.361722 -0.119527" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="bunny_collision.obj" scale="0.6170 0.6170 0.6170"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>
