@@ -10,6 +10,7 @@ import pybullet as p
 import numpy as np
 import tqdm
 
+from base_demo import FORCE_CLAMPING_START, REST_ANGULAR_DAMPING, REST_LINEAR_DAMPING, TORQUE_CLAMPING_START
 from models.model_physical import  WrenchPredictor
 from own_physics import calculate_force
 from parameters import SceneParameters
@@ -24,7 +25,7 @@ MAX_RUNS = 60000
 GRAVITY_RUNS = 200
 MAX_FRAMES = 2000
 
-all_impulse_predictor = WrenchPredictor()
+all_impulse_predictor = WrenchPredictor(input_dim=13)
 checkpoint = torch.load("checkpoints/wrench_model_best_phys.pth", map_location="cpu")
 state_dict = {k.removeprefix("_orig_mod."): v for k, v in checkpoint['model_state_dict'].items()}
 all_impulse_predictor.load_state_dict(state_dict)
@@ -52,9 +53,10 @@ def apply_spring_force(normal, penetration, cp, cube_id, current_linear_vel):
     p.applyExternalForce(cube_id, -1, force_vector.tolist(), cp[5], p.WORLD_FRAME)
 
 
-def apply_impulse_predictor(cube_id, current_linear_vel, relative_pos, relative_rot):
+def apply_impulse_predictor(cube_id, current_linear_vel, current_angular_vel, relative_pos, relative_rot):
     features = []
-    features.extend(current_linear_vel)          # 3 values
+    features.extend(current_linear_vel)          # 3 values<
+    features.extend(current_angular_vel)         # 3 values<
     features.extend([relative_pos[2]])     # 3 values
     roll, pitch, yaw = relative_rot
     features.extend([math.sin(roll), math.cos(roll),
@@ -78,7 +80,12 @@ def apply_impulse_predictor(cube_id, current_linear_vel, relative_pos, relative_
     torque = torque.numpy()
     cube_pos, _ = p.getBasePositionAndOrientation(cube_id)
     cube_pos = np.array(cube_pos)
-    
+
+    if(np.linalg.norm(force) < FORCE_CLAMPING_START):
+        force  += -REST_LINEAR_DAMPING  * np.array(current_linear_vel)
+
+    if(np.linalg.norm(torque) < TORQUE_CLAMPING_START):
+        torque += -REST_ANGULAR_DAMPING * np.array(current_angular_vel)
     if is_collision:
         p.applyExternalForce(
             cube_id, -1,
@@ -100,7 +107,7 @@ def main():
 
     frame = 0
     plane_id,  cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
-    initial_orientation = p.getQuaternionFromEuler([0.0, 0.2, 0.0])
+    initial_orientation = p.getQuaternionFromEuler([math.pi/2, 0, 0.0])
 
     p.resetBasePositionAndOrientation(
         cube_id,
@@ -163,7 +170,7 @@ def main():
         relative_euler = p.getEulerFromQuaternion(relative_quat)
 
         # Apply predicted forces BEFORE stepping simulation
-        apply_impulse_predictor(cube_id, current_linear_vel, relative_pos, relative_euler)
+        apply_impulse_predictor(cube_id, current_linear_vel, current_angular_vel, relative_pos, relative_euler)
 
         # Step simulation
         p.stepSimulation()
