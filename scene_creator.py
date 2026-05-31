@@ -37,6 +37,13 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
         rgbaColor=[0.8, 0.2, 0.2, 1]
     )
 
+    #cube_id = p.createMultiBody(
+    #    baseMass=1.0,
+    #    baseCollisionShapeIndex=col_id,
+    #    baseVisualShapeIndex=vis_id,
+    #    basePosition=[0, 0, 0.5],
+    #    baseOrientation=random_quaternion()
+    #)
 
     cube_id = p.loadURDF(
         "/home/niklas/Dokumente/privat/repositories/py_bullet/blender_models/bunny.urdf",

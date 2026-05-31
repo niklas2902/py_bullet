@@ -100,7 +100,7 @@ def main():
 
     frame = 0
     plane_id,  cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
-    initial_orientation = p.getQuaternionFromEuler([0.0, 0.2, 0.0])
+    initial_orientation = p.getQuaternionFromEuler([math.pi / 3, 0, 0.0])
 
     p.resetBasePositionAndOrientation(
         cube_id,

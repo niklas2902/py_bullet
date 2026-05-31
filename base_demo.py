@@ -45,11 +45,11 @@ def apply_impulse_predictor(cube_id, current_linear_vel, current_angular_vel, co
         r = contact_pos_world - cube_pos
         net_torque += np.cross(r, force_vector)
     print(np.linalg.norm(net_force))
-    if(np.linalg.norm(net_force) < FORCE_CLAMPING_START):
-        net_force  += -REST_LINEAR_DAMPING  * np.array(current_linear_vel)
+    #if(np.linalg.norm(net_force) < FORCE_CLAMPING_START):
+    #    net_force  += -REST_LINEAR_DAMPING  * np.array(current_linear_vel)
     
-    if(np.linalg.norm(net_torque) < TORQUE_CLAMPING_START):
-        net_torque += -REST_ANGULAR_DAMPING * np.array(current_angular_vel)
+    #if(np.linalg.norm(net_torque) < TORQUE_CLAMPING_START):
+    #    net_torque += -REST_ANGULAR_DAMPING * np.array(current_angular_vel)
 
     p.applyExternalForce(cube_id, -1, net_force.tolist(), cube_pos.tolist(), p.WORLD_FRAME)
     p.applyExternalTorque(cube_id, -1, net_torque.tolist(), p.WORLD_FRAME)
@@ -85,7 +85,7 @@ def main():
     _disable_default_contact_response(plane_id)
 
     p.resetBaseVelocity(cube_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-    initial_orientation = p.getQuaternionFromEuler([math.pi / 4, 0, 0.0])
+    initial_orientation = p.getQuaternionFromEuler([math.pi / 3, 0, 0.0])
     p.resetBasePositionAndOrientation(
         cube_id,
         p.getBasePositionAndOrientation(cube_id)[0],

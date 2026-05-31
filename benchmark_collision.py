@@ -2,15 +2,15 @@
 Benchmark: Collision Resolution & Force Computation
 ====================================================
 Measures wall-clock time for:
-  1. Collision detection  (p.performCollisionDetection)
-  2. Contact point lookup (p.getContactPoints)
-  3. Force computation    (calculate_force only)
-  4. Force application    (p.applyExternalForce only)
-  5. Full resolution      (compute + apply for all contacts)
-  6. Full frame           (detect + query + resolve + step)
+  1. Contact point lookup (p.getContactPoints)
+  2. Force computation    (calculate_force only, summed over contacts)
+  3. Force application    (applyExternalForce + applyExternalTorque)
+  4. Full resolution      (compute + apply for all contacts)
+  5. Full frame           (step + query + resolve)
 
-Uses performCollisionDetection() to isolate the collision narrow-phase
-from the full stepSimulation().
+Mirrors the physics of base_demo.py: step first, then read contacts and
+apply net force + torque using _contact_point_velocity (angular velocity
+included). PyBullet's built-in contact response is disabled.
 
 Usage:
     python benchmark_collision.py [--frames 2000] [--warmup 50] [--repeats 3] [--target-fps 60]
@@ -24,7 +24,7 @@ from typing import List
 import numpy as np
 import pybullet as p
 
-from own_physics import calculate_force
+from own_physics import calculate_force, _contact_point_velocity
 from parameters import SceneParameters
 from scene_creator import create_scene
 
@@ -72,6 +72,20 @@ def bench_calculate_force_micro(cube_id, samples: int) -> List[float]:
 
 
 # ------------------------------------------------------------------
+# disable PyBullet's built-in contact solver (mirrors base_demo.py)
+# ------------------------------------------------------------------
+def _disable_default_contact_response(body_id):
+    for link in range(-1, p.getNumJoints(body_id)):
+        p.changeDynamics(
+            body_id, link,
+            restitution=0.0,
+            lateralFriction=0.0,
+            contactStiffness=1e-9,
+            contactDamping=1e-9,
+        )
+
+
+# ------------------------------------------------------------------
 # full simulation benchmark
 # ------------------------------------------------------------------
 def bench_simulation(frames: int, warmup: int) -> dict:
@@ -79,6 +93,9 @@ def bench_simulation(frames: int, warmup: int) -> dict:
     plane_id, cube_id, timestep = create_scene(
         p, True, SceneParameters(random_rotation=True)
     )
+    _disable_default_contact_response(cube_id)
+    _disable_default_contact_response(plane_id)
+
     initial_orientation = p.getQuaternionFromEuler([0.0, 0.2, 0.0])
     p.resetBasePositionAndOrientation(
         cube_id,
@@ -88,7 +105,6 @@ def bench_simulation(frames: int, warmup: int) -> dict:
     p.resetBaseVelocity(cube_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
 
     timings = {
-        "collision_detect": [],
         "contact_lookup": [],
         "force_compute": [],
         "force_apply": [],
@@ -97,56 +113,60 @@ def bench_simulation(frames: int, warmup: int) -> dict:
     }
 
     for frame in range(frames + warmup):
-        current_linear_vel, _ = p.getBaseVelocity(cube_id)
         recording = frame >= warmup
 
         frame_start = time.perf_counter()
 
-        # --- Collision detection (narrow phase only) ---
-        t0 = time.perf_counter()
-        p.performCollisionDetection()
-        t1 = time.perf_counter()
+        # --- Step simulation first (like base_demo.py) ---
+        p.stepSimulation()
+
+        # --- Get velocities (linear + angular) ---
+        current_linear_vel, current_angular_vel = p.getBaseVelocity(cube_id)
 
         # --- Contact point lookup ---
+        t1 = time.perf_counter()
         contact_points = p.getContactPoints(bodyA=cube_id, bodyB=plane_id)
         t2 = time.perf_counter()
 
-        # --- Force compute + apply (split per contact) ---
+        # --- Net force + torque (mirrors apply_impulse_predictor) ---
         resolve_start = time.perf_counter()
         compute_total = 0.0
         apply_total = 0.0
 
         if contact_points:
-            if len(contact_points) > 4:
-                raise RuntimeError("Too many contact points")
+            cube_pos, _ = p.getBasePositionAndOrientation(cube_id)
+            cube_pos = np.array(cube_pos)
+            n_contacts = len(contact_points)
+
+            net_force = np.zeros(3)
+            net_torque = np.zeros(3)
 
             for cp in contact_points:
-                pen = cp[8]
-                normal = cp[7]
+                contact_pos_world = np.array(cp[5])
+                v_contact = _contact_point_velocity(
+                    cube_id, contact_pos_world, current_linear_vel, current_angular_vel
+                )
 
                 tc0 = time.perf_counter()
-                force_vector = calculate_force(
-                    normal, pen, cube_id, current_linear_vel
-                )
+                force_vector = np.asarray(
+                    calculate_force(cp[7], cp[8], cube_id, v_contact.tolist())
+                ) / n_contacts
                 tc1 = time.perf_counter()
 
-                p.applyExternalForce(
-                    cube_id, -1, force_vector.tolist(), cp[5], p.WORLD_FRAME
-                )
-                tc2 = time.perf_counter()
-
+                net_force += force_vector
+                net_torque += np.cross(contact_pos_world - cube_pos, force_vector)
                 compute_total += tc1 - tc0
-                apply_total += tc2 - tc1
+
+            ta0 = time.perf_counter()
+            p.applyExternalForce(cube_id, -1, net_force.tolist(), cube_pos.tolist(), p.WORLD_FRAME)
+            p.applyExternalTorque(cube_id, -1, net_torque.tolist(), p.WORLD_FRAME)
+            ta1 = time.perf_counter()
+            apply_total = ta1 - ta0
 
         resolve_end = time.perf_counter()
-
-        # --- Step simulation (integration + constraints) ---
-        p.stepSimulation()
-
         frame_end = time.perf_counter()
 
         if recording:
-            timings["collision_detect"].append(t1 - t0)
             timings["contact_lookup"].append(t2 - t1)
             timings["full_frame"].append(frame_end - frame_start)
 
@@ -197,7 +217,6 @@ def main():
     )
 
     merged = {
-        "collision_detect": [],
         "contact_lookup": [],
         "force_compute": [],
         "force_apply": [],
@@ -217,7 +236,6 @@ def main():
     print()
 
     fps = args.target_fps
-    print_section("Single collision detection (performCollisionDetection)", merged["collision_detect"], fps)
     print_section("Single contact lookup (getContactPoints)", merged["contact_lookup"], fps)
     print_section("Single force computation (calculate_force, in-sim)", merged["force_compute"], fps)
     print_section("Single force application (applyExternalForce)", merged["force_apply"], fps)

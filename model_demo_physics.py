@@ -107,7 +107,7 @@ def main():
 
     frame = 0
     plane_id,  cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
-    initial_orientation = p.getQuaternionFromEuler([math.pi/2, 0, 0.0])
+    initial_orientation = p.getQuaternionFromEuler([math.pi / 3, 0, 0.0])
 
     p.resetBasePositionAndOrientation(
         cube_id,
@@ -124,7 +124,7 @@ def main():
 
     log_id = p.startStateLogging(
         p.STATE_LOGGING_VIDEO_MP4,
-        "collision_run_mlp.mp4"
+        "collision_run_phys.mp4"
     )
 
     # Disable ALL collisions for plane

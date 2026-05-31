@@ -8,10 +8,9 @@ import os
 TARGET_DURATION = 10.0  # seconds
 
 files = [
-    "collision_run_gnn.mp4",
     "collision_run_gt.mp4",
     "collision_run_mlp.mp4",
-    "collision_run_transfomer.mp4",
+    "collision_run_phys.mp4",
 ]
 
 os.makedirs("videos", exist_ok=True)

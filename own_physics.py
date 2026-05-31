@@ -292,16 +292,14 @@ def simulate_sections(value):
 
 if __name__ == "__main__":
     sections = 25
-    pool = multiprocessing.Pool(processes=sections)
     empty_collisions(SceneParameters(random_rotation = True))
     for i in tqdm.tqdm(range(1000), "gravity runs"):
         main(True, 5000, SceneParameters(random_rotation=True))
 
-    #ans = pool.map(simulate_sections, [(x_rot, sections) for x_rot in range(sections)])
-    """
-    for x_rot in tqdm.tqdm(range(45), "x"):
-        for y_rot in range(45):
-            for z_rot in range(45):
-                main(False, MAX_FRAMES_NORMAL, [x_rot, y_rot,z_rot], True)
-    """
+    with multiprocessing.Pool(processes=sections) as pool:
+        ans = pool.map(simulate_sections, [(x_rot, sections) for x_rot in range(sections)])
+    #for x_rot in tqdm.tqdm(range(45), "x"):
+    #    for y_rot in range(45):
+    #        for z_rot in range(45):
+    #            main(False, MAX_FRAMES_NORMAL, [x_rot, y_rot,z_rot], True)
 
