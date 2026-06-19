@@ -31,9 +31,9 @@ print("\nRunning CoACD (this will take a few minutes)...", flush=True)
 t0 = time.time()
 parts = coacd.run_coacd(
     mesh,
-    threshold=0.01,
+    threshold=0.05,
     max_convex_hull=1000,
-    resolution=400_000,
+    resolution=2_000_000,
     preprocess_mode="auto",
     preprocess_resolution=256,
     seed=42,
