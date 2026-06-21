@@ -2,3 +2,4 @@
 /final_output.json
 /final_output_contact_points.json
 checkpoints/*.pth
+venv
