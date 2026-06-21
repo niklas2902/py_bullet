@@ -104,7 +104,11 @@ def random_rotation_and_position(cube_id, plane_id, p, parameters:SceneParameter
     pos, rot = p.getBasePositionAndOrientation(cube_id)
     if parameters.random_rotation:
         rot = rot
-        p.resetBasePositionAndOrientation(cube_id, pos, rot)
+    else:
+        rot =  p.getQuaternionFromEuler([math.radians(parameters.rotation_parts[0] / parameters.rotation_fidelity * 360. + parameters.offset ),
+                                        math.radians(parameters.rotation_parts[1] / parameters.rotation_fidelity * 360. + parameters.offset ),
+                                        math.radians(parameters.rotation_parts[2] / parameters.rotation_fidelity * 360. + parameters.offset)])
+    p.resetBasePositionAndOrientation(cube_id, pos, rot)
     pts = p.getClosestPoints(bodyA=cube_id, bodyB=plane_id, distance=1)
     print(f"pts:{pts[0]}")
     nearest = min(pts, key=lambda c: c[8]) if pts else None
@@ -112,12 +116,9 @@ def random_rotation_and_position(cube_id, plane_id, p, parameters:SceneParameter
     normalized_dist = np.array([0,0,0]) # normalized(dist)
 
     if parameters.random_rotation:
-        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 0.1 , rot)
+        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 0.1, rot)
     else:
-        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 0.1,
-                                          p.getQuaternionFromEuler([math.radians(parameters.rotation_parts[0] / parameters.rotation_fidelity * 360. + parameters.offset ),
-                                                                     math.radians(parameters.rotation_parts[1] / parameters.rotation_fidelity * 360. + parameters.offset ),
-                                                                     math.radians(parameters.rotation_parts[2] / parameters.rotation_fidelity * 360. + parameters.offset)]))
+        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 0.1, rot)
 
 
 def get_min_z(global_vertex_positions):

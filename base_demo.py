@@ -79,7 +79,9 @@ def main():
 
     log_id = p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, "collision_run_gt.mp4")
 
-    plane_id, cube_id, timestep = create_scene(p, False, SceneParameters(random_rotation=True, velocity_range=((0,0), (0,0), (-3,-5))))
+    plane_id, cube_id, timestep = create_scene(p, False, SceneParameters(random_rotation=False, 
+                                                                         rotation_parts= (200,60,100),
+                                                                         velocity_range=((0,0), (0,0), (-3,-5))))
 
     _disable_default_contact_response(cube_id)
     _disable_default_contact_response(plane_id)
