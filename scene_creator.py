@@ -2,6 +2,7 @@ import math
 import random
 from typing import Any
 
+import numpy as np
 import pybullet_data
 
 from parameters import SceneParameters
@@ -18,10 +19,15 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
         p.setGravity(0, 0, 0)
 
     # Load plane
-    plane_id = p.loadURDF("plane.urdf")
+    plane_id = p.loadURDF(
+        "/home/niklas/Documents/privat/repositories/py_bullet/blender_models/bunny.urdf",
+        basePosition=[0, 0, 0.5],
+        baseOrientation=random_quaternion()
+    )
+
 
     # Make the plane bouncy
-    p.changeDynamics(plane_id, -1, restitution=0.9)
+    p.changeDynamics(plane_id, -1, restitution=0.5)
 
     # Create cube
     cube_size = 0.5  # full edge length of the cube
@@ -46,12 +52,12 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
     #)
 
     cube_id = p.loadURDF(
-        "/home/niklas/Dokumente/privat/repositories/py_bullet/blender_models/bunny.urdf",
-        basePosition=[0, 0, 0.5],
+        "/home/niklas/Documents/privat/repositories/py_bullet/blender_models/bunny.urdf",
+        basePosition=[0, 0, 2],
         baseOrientation=random_quaternion()
     )
 
-    random_rotation_an_position(cube_id, p, parameters)
+    random_rotation_and_position(cube_id, plane_id, p, parameters)
 
     # Make cube bouncy
     p.changeDynamics(cube_id, -1, restitution=0.5)
@@ -78,30 +84,37 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
     return plane_id, cube_id, timestep
 
 
-def reset_scene(p, cube_id, should_use_gravity: bool, parameters: SceneParameters):
+def reset_scene(p, cube_id,  plane_id, should_use_gravity: bool, parameters: SceneParameters):
     if should_use_gravity:
         p.setGravity(0, 0, -9.81)
     else:
         p.setGravity(0, 0, 0)
-    random_rotation_an_position(cube_id, p, parameters)
+    random_rotation_and_position(cube_id, plane_id , p, parameters)
     p.resetBaseVelocity(cube_id,
                         linearVelocity=[random.uniform(parameters.velocity_range[0][0], parameters.velocity_range[0][1]),
                                         random.uniform(parameters.velocity_range[1][0], parameters.velocity_range[1][1]),
                                         random.uniform(parameters.velocity_range[2][0], parameters.velocity_range[2][1])],
                         angularVelocity=random_angular_velocity())
 
-
-def random_rotation_an_position(cube_id, p, parameters:SceneParameters):
+def normalized(v):
+    normalized_v = v / np.sqrt(np.sum(v**2))
+    return normalized_v
+def random_rotation_and_position(cube_id, plane_id, p, parameters:SceneParameters):
+        
     pos, rot = p.getBasePositionAndOrientation(cube_id)
-    global_vertex_positions = get_global_vertex_positions(cube_id)
-    min_z = get_min_z(global_vertex_positions)
-    z = pos[2]
-    new_z = z - min_z + 0.001  # place bottom face just above plane at z=0
+    if parameters.random_rotation:
+        rot = rot
+        p.resetBasePositionAndOrientation(cube_id, pos, rot)
+    pts = p.getClosestPoints(bodyA=cube_id, bodyB=plane_id, distance=1)
+    print(f"pts:{pts[0]}")
+    nearest = min(pts, key=lambda c: c[8]) if pts else None
+    dist = (np.array(nearest[6]) - np.array(nearest[5]))
+    normalized_dist = np.array([0,0,0]) # normalized(dist)
 
     if parameters.random_rotation:
-        p.resetBasePositionAndOrientation(cube_id, [0, 0, new_z], random_quaternion())
+        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 0.1 , rot)
     else:
-        p.resetBasePositionAndOrientation(cube_id, [0, 0, new_z],
+        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 0.1,
                                           p.getQuaternionFromEuler([math.radians(parameters.rotation_parts[0] / parameters.rotation_fidelity * 360. + parameters.offset ),
                                                                      math.radians(parameters.rotation_parts[1] / parameters.rotation_fidelity * 360. + parameters.offset ),
                                                                      math.radians(parameters.rotation_parts[2] / parameters.rotation_fidelity * 360. + parameters.offset)]))

@@ -79,18 +79,10 @@ def main():
 
     log_id = p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, "collision_run_gt.mp4")
 
-    plane_id, cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation=True))
+    plane_id, cube_id, timestep = create_scene(p, False, SceneParameters(random_rotation=True, velocity_range=((0,0), (0,0), (-3,-5))))
 
     _disable_default_contact_response(cube_id)
     _disable_default_contact_response(plane_id)
-
-    p.resetBaseVelocity(cube_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-    initial_orientation = p.getQuaternionFromEuler([math.pi / 3, 0, 0.0])
-    p.resetBasePositionAndOrientation(
-        cube_id,
-        p.getBasePositionAndOrientation(cube_id)[0],
-        initial_orientation,
-    )
 
     frame = 0
     while frame < MAX_FRAMES:
@@ -104,10 +96,18 @@ def main():
                 cube_id, current_linear_vel, current_angular_vel, contact_points
             )
 
+            contact_points_plane = p.getContactPoints(bodyA=plane_id, bodyB=cube_id)
+            current_linear_vel_plane, current_angular_vel_plane = p.getBaseVelocity(plane_id)
+            apply_impulse_predictor(
+                plane_id, current_linear_vel_plane, current_angular_vel_plane, contact_points_plane
+            )
+
+
+
         if frame % 30 == 0:
             pos, _ = p.getBasePositionAndOrientation(cube_id)
             max_pen = max((c[8] for c in contact_points), default=0.0)
-            print(f"f={frame:4d} z={pos[2]:+.3f} vz={current_linear_vel[2]:+.3f} "
+            print(f"f, mass=0={frame:4d} z={pos[2]:+.3f} vz={current_linear_vel[2]:+.3f} "
                   f"n={len(contact_points):2d} pen={max_pen:.4f}")
 
         frame += 1

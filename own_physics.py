@@ -13,7 +13,7 @@ import tqdm
 
 from parameters import SceneParameters
 from recorder import record_collision, record_collision_empty
-from scene_creator import create_scene, reset_scene, random_rotation_an_position
+from scene_creator import create_scene, reset_scene, random_rotation_and_position
 
 SPRING_CONSTANT = 1000  # N/m
 BOUNCINESS_FACTOR = 0.5
