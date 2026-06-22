@@ -51,9 +51,18 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
     #    baseOrientation=random_quaternion()
     #)
 
+    sphere_radius = parameters.spawn_radius
+    spawn_angles = parameters.spawn_angles
+    theta = spawn_angles.theta * (math.pi / 180)
+    phi = spawn_angles.phi * (math.pi / 180)
+    x = sphere_radius * math.sin(phi) * math.cos(theta)
+    y = sphere_radius * math.sin(phi) * math.sin(theta)
+    z = sphere_radius * math.cos(phi)
+    spawn_point = np.array([x,y,z])
+
     cube_id = p.loadURDF(
         "/home/niklas/Documents/privat/repositories/py_bullet/blender_models/bunny.urdf",
-        basePosition=[0, 0, 2],
+        basePosition=[x, y, z],
         baseOrientation=random_quaternion()
     )
 
@@ -74,10 +83,9 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
 
     # Give initial downward velocity (since gravity is off)
     p.resetBaseVelocity(cube_id,
-                        linearVelocity=[random.uniform(parameters.velocity_range[0][0], parameters.velocity_range[0][1]),
-                                        random.uniform(parameters.velocity_range[1][0], parameters.velocity_range[1][1]),
-                                        random.uniform(parameters.velocity_range[2][0], parameters.velocity_range[2][1])],
+                        linearVelocity=np.array([0,0,random.uniform(-sphere_radius, sphere_radius)]) - spawn_point,
                         angularVelocity=random_angular_velocity())
+    p.resetBaseVelocity(plane_id, linearVelocity=[0,0,0], angularVelocity=random_angular_velocity())
 
     timestep = 1.0 / 240
     p.setTimeStep(timestep)
@@ -109,8 +117,7 @@ def random_rotation_and_position(cube_id, plane_id, p, parameters:SceneParameter
                                         math.radians(parameters.rotation_parts[1] / parameters.rotation_fidelity * 360. + parameters.offset ),
                                         math.radians(parameters.rotation_parts[2] / parameters.rotation_fidelity * 360. + parameters.offset)])
     p.resetBasePositionAndOrientation(cube_id, pos, rot)
-    pts = p.getClosestPoints(bodyA=cube_id, bodyB=plane_id, distance=1)
-    print(f"pts:{pts[0]}")
+    pts = p.getClosestPoints(bodyA=cube_id, bodyB=plane_id, distance=3)
     nearest = min(pts, key=lambda c: c[8]) if pts else None
     dist = (np.array(nearest[6]) - np.array(nearest[5]))
     normalized_dist = np.array([0,0,0]) # normalized(dist)
