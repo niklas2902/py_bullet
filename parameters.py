@@ -2,8 +2,8 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Angles:
-    theta: float = 180
-    phi: float = 90
+    theta: float = 0
+    phi: float = 0
 
 @dataclass
 class SceneParameters:

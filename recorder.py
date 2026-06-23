@@ -45,195 +45,239 @@ def to_vector(list_vector):
     return output
 
 
-def record_collision(p, collision_data: list[Any], collision_points: list[Any], contact_points, frame: int, plane_id,
-                     prev_angular_vel: list[int] | Any,
-                     current_linear_vel: list[int] | Any, sphere_id):
+def record_collision(p, collision_data: list[Any], collision_points: list[Any], 
+                     contact_points_A, contact_points_B, frame: int,
+                    objectA_id, objectB_id):
     from own_physics import calculate_force, _contact_point_velocity
-
+    assert(len(contact_points_A) == len(contact_points_B))
     # Get global poses (world frame)
-    sphere_pos, sphere_quat = p.getBasePositionAndOrientation(sphere_id)
-    plane_pos, plane_quat = p.getBasePositionAndOrientation(plane_id)
+    objectA_pos, objectA_quat = p.getBasePositionAndOrientation(objectA_id)
+    objectB_pos, objectB_quat = p.getBasePositionAndOrientation(objectB_id)
 
     # Get velocities
-    _, angular_vel = p.getBaseVelocity(sphere_id)
+    linear_velA, angular_velA = p.getBaseVelocity(objectA_id)
+    linear_velB, angular_velB = p.getBaseVelocity(objectB_id)
 
     # Convert quaternions to Euler angles for easier understanding
-    cube_euler = p.getEulerFromQuaternion(sphere_quat)
-    plane_euler = p.getEulerFromQuaternion(plane_quat)
+    objectA_euler = p.getEulerFromQuaternion(objectA_quat)
+    objectB_euler = p.getEulerFromQuaternion(objectB_quat)
 
     # Calculate relative position (cube relative to plane)
     relative_pos = [
-        sphere_pos[0] - plane_pos[0],
-        sphere_pos[1] - plane_pos[1],
-        sphere_pos[2] - plane_pos[2],
+        objectA_pos[0] - objectB_pos[0],
+        objectA_pos[1] - objectB_pos[1],
+        objectA_pos[2] - objectB_pos[2],
     ]
 
     # Calculate relative rotation (cube relative to plane)
-    inv_plane_quat = p.invertTransform([0, 0, 0], plane_quat)[1]
+    inv_plane_quat = p.invertTransform([0, 0, 0], objectB_quat)[1]
     relative_quat = p.multiplyTransforms([0, 0, 0], inv_plane_quat,
-                                         [0, 0, 0], sphere_quat)[1]
+                                         [0, 0, 0], objectA_quat)[1]
     relative_euler = p.getEulerFromQuaternion(relative_quat)
 
     # Prepare contact points list
     points = []
 
-    for contact in contact_points:
-        contact_normal = contact[7]
-        contact_pos_on_self = contact[5]  # contact position in world space (on cube)
+    for collision_point_index in range(len(contact_points_A)):
+        contactA = contact_points_A[collision_point_index]
+        contactB = contact_points_B[collision_point_index]
+
+        contact_normalA = contactA[7]
+        contact_pos_on_selfA = contactA[5]
+        contact_normalB = contactB[7]
+        contact_pos_on_selfB = contactB[5]
 
         # Calculate lever arm (contact position relative to cube center)
-        lever_arm = [
-            contact_pos_on_self[0] - sphere_pos[0],
-            contact_pos_on_self[1] - sphere_pos[1],
-            contact_pos_on_self[2] - sphere_pos[2],
+        lever_armA = [
+            contact_pos_on_selfA[0] - objectA_pos[0],
+            contact_pos_on_selfA[1] - objectA_pos[1],
+            contact_pos_on_selfA[2] - objectA_pos[2],
         ]
 
-        v_contact = _contact_point_velocity(sphere_id, contact_pos_on_self, current_linear_vel, angular_vel)
-        force = calculate_force(contact_normal, contact[8], sphere_id, v_contact.tolist())
+        lever_armB = [
+            contact_pos_on_selfB[0] - objectB_pos[0],
+            contact_pos_on_selfB[1] - objectB_pos[1],
+            contact_pos_on_selfB[2] - objectB_pos[2],
+        ]
+
+        v_contactA = _contact_point_velocity(objectA_id, contact_pos_on_selfA, linear_velA, angular_velA)
+        forceA = calculate_force(contact_normalA, contactA[8], objectA_id, v_contactA.tolist())
+
+        v_contactB = _contact_point_velocity(objectB_id, contact_pos_on_selfB, linear_velB, angular_velB)
+        forceB = calculate_force(contact_normalB, contactB[8], objectB_id, v_contactB.tolist())
 
         points.append({
             "contact_position_world": {
-                "x": float(contact_pos_on_self[0]),
-                "y": float(contact_pos_on_self[1]),
-                "z": float(contact_pos_on_self[2]),
+                "x": float(contact_pos_on_selfA[0]),
+                "y": float(contact_pos_on_selfA[1]),
+                "z": float(contact_pos_on_selfA[2]),
             },
-            "contact_position_relative_to_self": {
-                "x": float(lever_arm[0]),
-                "y": float(lever_arm[1]),
-                "z": float(lever_arm[2]),
+            "contact_position_relative_to_A": {
+                "x": float(lever_armA[0]),
+                "y": float(lever_armA[1]),
+                "z": float(lever_armA[2]),
             },
-            "force": {
-                "x": float(force[0]),
-                "y": float(force[1]),
-                "z": float(force[2]),
+            "contact_position_relative_to_B": {
+                "x": float(lever_armB[0]),
+                "y": float(lever_armB[1]),
+                "z": float(lever_armB[2]),
             },
-            "penetration": contact[8],
-            "contact_normal": {
-                "x": float(contact_normal[0]),
-                "y": float(contact_normal[1]),
-                "z": float(contact_normal[2]),
+            "forceA": {
+                "x": float(forceA[0]),
+                "y": float(forceA[1]),
+                "z": float(forceA[2]),
+            },
+            "forceB": {
+                "x": float(forceB[0]),
+                "y": float(forceB[1]),
+                "z": float(forceB[2]),
+            },
+            "penetration": contactA[8],
+            "contact_normalA": {
+                "x": float(contact_normalA[0]),
+                "y": float(contact_normalA[1]),
+                "z": float(contact_normalA[2]),
+            },
+            "contact_normalB": {
+                "x": float(contact_normalB[0]),
+                "y": float(contact_normalB[1]),
+                "z": float(contact_normalB[2]),
             }
         })
 
     collision_entry = {
         "frame": frame,
-        "linear_velocity": {
-            "x": float(current_linear_vel[0]),
-            "y": float(current_linear_vel[1]),
-            "z": float(current_linear_vel[2]),
+        "linear_velocityA": {
+            "x": float(linear_velA[0]),
+            "y": float(linear_velA[1]),
+            "z": float(linear_velA[2]),
         },
-        "angular_velocity": {
-            "x": float(angular_vel[0]),
-            "y": float(angular_vel[1]),
-            "z": float(angular_vel[2]),
+        "linear_velocityB": {
+            "x": float(linear_velB[0]),
+            "y": float(linear_velB[1]),
+            "z": float(linear_velB[2]),
         },
-        "self_position": {
-            "x": float(sphere_pos[0]),
-            "y": float(sphere_pos[1]),
-            "z": float(sphere_pos[2]),
+        "angular_velocityA": {
+            "x": float(angular_velA[0]),
+            "y": float(angular_velA[1]),
+            "z": float(angular_velA[2]),
         },
-        "self_rotation": {
-            "qx": float(sphere_quat[0]),
-            "qy": float(sphere_quat[1]),
-            "qz": float(sphere_quat[2]),
-            "qw": float(sphere_quat[3]),
-            "roll": float(cube_euler[0]),
-            "pitch": float(cube_euler[1]),
-            "yaw": float(cube_euler[2]),
+        "angular_velocityB": {
+            "x": float(angular_velB[0]),
+            "y": float(angular_velB[1]),
+            "z": float(angular_velB[2]),
         },
-        "relative_position_to_collider": {
+        "A_pos": {
+            "x": float(objectA_pos[0]),
+            "y": float(objectA_pos[1]),
+            "z": float(objectA_pos[2]),
+        },
+        "B_pos": {
+            "x": float(objectB_pos[0]),
+            "y": float(objectB_pos[1]),
+            "z": float(objectB_pos[2]),
+        },
+        "A_rotation": {
+            "qx": float(objectA_quat[0]),
+            "qy": float(objectA_quat[1]),
+            "qz": float(objectA_quat[2]),
+            "qw": float(objectA_quat[3]),
+            "roll": float(objectA_euler[0]),
+            "pitch": float(objectA_euler[1]),
+            "yaw": float(objectA_euler[2]),
+        },
+
+        "B_rotation": {
+            "qx": float(objectB_quat[0]),
+            "qy": float(objectB_quat[1]),
+            "qz": float(objectB_quat[2]),
+            "qw": float(objectB_quat[3]),
+            "roll": float(objectB_euler[0]),
+            "pitch": float(objectB_euler[1]),
+            "yaw": float(objectB_euler[2]),
+        },
+        "relative_position_A_to_B": {
             "x": float(relative_pos[0]),
             "y": float(relative_pos[1]),
             "z": float(relative_pos[2]),
         },
-        "relative_rotation_to_collider": {
+        "relative_rotation_A_to_B": {
             "roll": float(relative_euler[0]),
             "pitch": float(relative_euler[1]),
             "yaw": float(relative_euler[2]),
         },
-        "self_scale": {
+        "A_scale": {
             "x": 1.0,
             "y": 1.0,
             "z": 1.0,
         },
-        "self_transform": create_transform_data(p, sphere_pos, sphere_quat, [1.0, 1.0, 1.0]),
-        "collider_position": {
-            "x": float(plane_pos[0]),
-            "y": float(plane_pos[1]),
-            "z": float(plane_pos[2]),
+        "B_scale": {
+            "x": 1.0,
+            "y": 1.0,
+            "z": 1.0,
         },
-        "collider_rotation": {
-            "qx": float(plane_quat[0]),
-            "qy": float(plane_quat[1]),
-            "qz": float(plane_quat[2]),
-            "qw": float(plane_quat[3]),
-            "roll": float(plane_euler[0]),
-            "pitch": float(plane_euler[1]),
-            "yaw": float(plane_euler[2]),
-        },
+        "A_transform": create_transform_data(p, objectA_pos, objectA_quat, [1.0, 1.0, 1.0]),
+        "B_transform": create_transform_data(p, objectB_pos, objectB_quat, [1.0, 1.0, 1.0]),
         "collider_scale": {
             "x": 1.0,
             "y": 1.0,
             "z": 1.0,
         },
-        "collider_transform": create_transform_data(p, plane_pos, plane_quat, [1.0, 1.0, 1.0]),
+        "collider_transform": create_transform_data(p, objectB_pos, objectB_quat, [1.0, 1.0, 1.0]),
         "points": points,
-        "collider_name": "plane",
-        "collider_id": plane_id,
-        "collider_shape_index": None,
-        "self_mesh": None,
-        "collider_mesh": None,
+        "A_mesh": None,
+        "B_mesh": None,
     }
 
     collision_data.append(collision_entry)
 
     # Store a simpler summary for collision points if needed
     collision_point_entry = {
-        "self_position": {
-            "x": float(sphere_pos[0]),
-            "y": float(sphere_pos[1]),
-            "z": float(sphere_pos[2]),
+        "A_position": {
+            "x": float(objectA_pos[0]),
+            "y": float(objectA_pos[1]),
+            "z": float(objectA_pos[2]),
         },
-        "linear_velocity": {
-            "x": float(current_linear_vel[0]),
-            "y": float(current_linear_vel[1]),
-            "z": float(current_linear_vel[2]),
+        "linear_velocityA": {
+            "x": float(linear_velA[0]),
+            "y": float(linear_velA[1]),
+            "z": float(linear_velA[2]),
         },
         "angular_velocity": {
-            "x": float(angular_vel[0]),
-            "y": float(angular_vel[1]),
-            "z": float(angular_vel[2]),
+            "x": float(angular_velA[0]),
+            "y": float(angular_velA[1]),
+            "z": float(angular_velA[2]),
         },
-        "self_rotation": {
-            "qx": float(sphere_quat[0]),
-            "qy": float(sphere_quat[1]),
-            "qz": float(sphere_quat[2]),
-            "qw": float(sphere_quat[3]),
-            "roll": float(cube_euler[0]),
-            "pitch": float(cube_euler[1]),
-            "yaw": float(cube_euler[2]),
+        "A_rotation": {
+            "qx": float(objectA_quat[0]),
+            "qy": float(objectA_quat[1]),
+            "qz": float(objectA_quat[2]),
+            "qw": float(objectA_quat[3]),
+            "roll": float(objectA_euler[0]),
+            "pitch": float(objectA_euler[1]),
+            "yaw": float(objectA_euler[2]),
         },
-        "collider_position": {
-            "x": float(plane_pos[0]),
-            "y": float(plane_pos[1]),
-            "z": float(plane_pos[2]),
+        "B_position": {
+            "x": float(objectB_pos[0]),
+            "y": float(objectB_pos[1]),
+            "z": float(objectB_pos[2]),
         },
-        "collider_rotation": {
-            "qx": float(plane_quat[0]),
-            "qy": float(plane_quat[1]),
-            "qz": float(plane_quat[2]),
-            "qw": float(plane_quat[3]),
-            "roll": float(plane_euler[0]),
-            "pitch": float(plane_euler[1]),
-            "yaw": float(plane_euler[2]),
+        "B_rotation": {
+            "qx": float(objectB_quat[0]),
+            "qy": float(objectB_quat[1]),
+            "qz": float(objectB_quat[2]),
+            "qw": float(objectB_quat[3]),
+            "roll": float(objectB_euler[0]),
+            "pitch": float(objectB_euler[1]),
+            "yaw": float(objectB_euler[2]),
         },
 
-        "relative_position_to_collider": {
+        "relative_position_A_to_B": {
             "x": float(relative_pos[0]),
             "y": float(relative_pos[1]),
             "z": float(relative_pos[2]),
         },
-        "relative_rotation_to_collider": {
+        "relative_rotation_A_to_B": {
             "roll": float(relative_euler[0]),
             "pitch": float(relative_euler[1]),
             "yaw": float(relative_euler[2]),
@@ -243,80 +287,86 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any], 
 
     collision_points.append(collision_point_entry)
 
-def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points:list[Any], current_linear_vel:list):
+def record_collision_empty(p, objectA_id: int, objectB_id:int, empty_collision_points:list[Any]):
     # Get current state after collision
-    pos, quat = p.getBasePositionAndOrientation(cube_id)
+    posA, quatA = p.getBasePositionAndOrientation(objectA_id)
+    posB, quatB = p.getBasePositionAndOrientation(objectB_id)
 
     collision_point_entry={}
-    # Get plane position and orientation
-    plane_pos, plane_quat = p.getBasePositionAndOrientation(plane_id)
-
+    
     # Calculate relative position (cube relative to plane)
     relative_pos = [
-        pos[0] - plane_pos[0],
-        pos[1] - plane_pos[1],
-        pos[2] - plane_pos[2],
+        posA[0] - posB[0],
+        posA[1] - posB[1],
+        posA[2] - posB[2],
     ]
 
     # Calculate relative rotation (cube relative to plane)
-    inv_plane_quat = p.invertTransform([0, 0, 0], plane_quat)[1]
+    inv_plane_quat = p.invertTransform([0, 0, 0], quatB)[1]
     relative_quat = p.multiplyTransforms([0, 0, 0], inv_plane_quat,
-                                         [0, 0, 0], quat)[1]
+                                         [0, 0, 0], quatA)[1]
+    
     relative_euler = p.getEulerFromQuaternion(relative_quat)
 
 
-    _, angular_vel = p.getBaseVelocity(cube_id)
+    linear_velA, angular_velA = p.getBaseVelocity(objectA_id)
+    linear_velB, angular_velB = p.getBaseVelocity(objectB_id)
 
 
 
-    collision_point_entry["self_position"] = {
-        "x": float(pos[0]),
-        "y": float(pos[1]),
-        "z": float(pos[2])
+    collision_point_entry["A_position"] = {
+        "x": float(posA[0]),
+        "y": float(posA[1]),
+        "z": float(posA[2])
+    },
+    
+    collision_point_entry["B_position"] = {
+        "x": float(posB[0]),
+        "y": float(posB[1]),
+        "z": float(posB[2])
     }
 
-    collision_point_entry["relative_position_to_collider"] = {
+    collision_point_entry["relative_position_A_to_B"] = {
         "x": float(relative_pos[0]),
         "y": float(relative_pos[1]),
         "z": float(relative_pos[2])
     }
 
-    collision_point_entry["relative_rotation_to_collider"] = {
+    collision_point_entry["relative_rotation_A_to_B"] = {
         "roll": float(relative_euler[0]),
         "pitch": float(relative_euler[1]),
         "yaw": float(relative_euler[2])
     }
 
-    collision_point_entry["self_rotation"] = {
-        "x": float(quat[0]),
-        "y": float(quat[1]),
-        "z": float(quaternion_to_euler(p, quat))
+    collision_point_entry["A_rotation"] = {
+        "x": float(quatA[0]),
+        "y": float(quatA[1]),
+        "z": float(quaternion_to_euler(p, quatA))
     }
-    collision_point_entry["collider_position"] = {
-        "x": float(plane_pos[0]),
-        "y": float(plane_pos[1]),
-        "z": float(plane_pos[2])
+    collision_point_entry["B_rotation"] = {
+        "x": float(quatB[0]),
+        "y": float(quatB[1]),
+        "z": float(quaternion_to_euler(p, quatB))
     }
-    collision_point_entry["self_rotation"] = {
-        "x": float(quat[0]),
-        "y": float(quat[1]),
-        "z": float(quaternion_to_euler(p, quat))
-
+    collision_point_entry["linear_velocity_A"] = {
+        "x": linear_velA[0],
+        "y": linear_velA[1],
+        "z": linear_velA[2]
     }
-    collision_point_entry["collider_rotation"] = {
-        "x": float(plane_quat[0]),
-        "y": float(plane_quat[1]),
-        "z": float(quaternion_to_euler(p, plane_quat))
+    collision_point_entry["linear_velocity_B"] = {
+        "x": linear_velB[0],
+        "y": linear_velB[1],
+        "z": linear_velB[2]
     }
-    collision_point_entry["linear_velocity"] = {
-        "x": current_linear_vel[0],
-        "y": current_linear_vel[1],
-        "z": current_linear_vel[2]
+    collision_point_entry["angular_velocity_A"] = {
+        "x": angular_velA[0],
+        "y": angular_velA[1],
+        "z": angular_velA[2]
     }
-    collision_point_entry["angular_velocity"] = {
-        "x": angular_vel[0],
-        "y": angular_vel[1],
-        "z": angular_vel[2]
+    collision_point_entry["angular_velocity_B"] = {
+        "x": angular_velB[0],
+        "y": angular_velB[1],
+        "z": angular_velB[2]
     }
 
     collision_point_entry["points"] = []

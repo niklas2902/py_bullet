@@ -29,19 +29,6 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
     # Make the plane bouncy
     p.changeDynamics(plane_id, -1, restitution=0.5)
 
-    # Create cube
-    cube_size = 0.5  # full edge length of the cube
-    half = cube_size / 2
-
-    col_id = p.createCollisionShape(
-        shapeType=p.GEOM_BOX,
-        halfExtents=[half, half, half]
-    )
-    vis_id = p.createVisualShape(
-        shapeType=p.GEOM_BOX,
-        halfExtents=[half, half, half],
-        rgbaColor=[0.8, 0.2, 0.2, 1]
-    )
 
     #cube_id = p.createMultiBody(
     #    baseMass=1.0,
@@ -51,22 +38,17 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
     #    baseOrientation=random_quaternion()
     #)
 
-    sphere_radius = parameters.spawn_radius
-    spawn_angles = parameters.spawn_angles
-    theta = spawn_angles.theta * (math.pi / 180)
-    phi = spawn_angles.phi * (math.pi / 180)
-    x = sphere_radius * math.sin(phi) * math.cos(theta)
-    y = sphere_radius * math.sin(phi) * math.sin(theta)
-    z = sphere_radius * math.cos(phi)
-    spawn_point = np.array([x,y,z])
 
     cube_id = p.loadURDF(
         "/home/niklas/Documents/privat/repositories/py_bullet/blender_models/bunny.urdf",
-        basePosition=[x, y, z],
+        basePosition=[0, 0, 2],
         baseOrientation=random_quaternion()
     )
 
     random_rotation_and_position(cube_id, plane_id, p, parameters)
+
+    spawn_point, _ = p.getBasePositionAndOrientation(cube_id)
+    sphere_radius = parameters.spawn_radius
 
     # Make cube bouncy
     p.changeDynamics(cube_id, -1, restitution=0.5)
@@ -83,9 +65,13 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
 
     # Give initial downward velocity (since gravity is off)
     p.resetBaseVelocity(cube_id,
-                        linearVelocity=np.array([0,0,random.uniform(-sphere_radius, sphere_radius)]) - spawn_point,
+                        linearVelocity=normalized(np.array([0,0,random.uniform(-sphere_radius, sphere_radius)]) - np.array(spawn_point)) 
+                        * random.uniform(parameters.velocity_range[0],parameters.velocity_range[1]) ,
                         angularVelocity=random_angular_velocity())
-    p.resetBaseVelocity(plane_id, linearVelocity=[0,0,0], angularVelocity=random_angular_velocity())
+
+    p.resetBaseVelocity(plane_id,
+                        linearVelocity=np.array([0,0,0]),
+                        angularVelocity=random_angular_velocity())
 
     timestep = 1.0 / 240
     p.setTimeStep(timestep)
@@ -97,19 +83,38 @@ def reset_scene(p, cube_id,  plane_id, should_use_gravity: bool, parameters: Sce
         p.setGravity(0, 0, -9.81)
     else:
         p.setGravity(0, 0, 0)
+    
+    p.resetBasePositionAndOrientation(plane_id, [0,0,0], random_quaternion())
     random_rotation_and_position(cube_id, plane_id , p, parameters)
+
+    spawn_point, _ = p.getBasePositionAndOrientation(cube_id)
+    sphere_radius = parameters.spawn_radius
+
+    p.resetBaseVelocity(plane_id, linearVelocity=[0,0,0], angularVelocity=random_angular_velocity())
     p.resetBaseVelocity(cube_id,
-                        linearVelocity=[random.uniform(parameters.velocity_range[0][0], parameters.velocity_range[0][1]),
-                                        random.uniform(parameters.velocity_range[1][0], parameters.velocity_range[1][1]),
-                                        random.uniform(parameters.velocity_range[2][0], parameters.velocity_range[2][1])],
+                        linearVelocity=normalized(np.array([0,0,random.uniform(-sphere_radius, sphere_radius)]) - np.array(spawn_point)) 
+                        * random.uniform(parameters.velocity_range[0],parameters.velocity_range[1]) ,
                         angularVelocity=random_angular_velocity())
+
 
 def normalized(v):
     normalized_v = v / np.sqrt(np.sum(v**2))
     return normalized_v
+
 def random_rotation_and_position(cube_id, plane_id, p, parameters:SceneParameters):
+    sphere_radius = parameters.spawn_radius
+    spawn_angles = parameters.spawn_angles
+    theta = spawn_angles.theta * (math.pi / 180)
+    phi = spawn_angles.phi * (math.pi / 180)
+    x = sphere_radius * math.sin(phi) * math.cos(theta)
+    y = sphere_radius * math.sin(phi) * math.sin(theta)
+    z = sphere_radius * math.cos(phi)
+    spawn_point = np.array([x,y,z])
         
     pos, rot = p.getBasePositionAndOrientation(cube_id)
+    p.resetBasePositionAndOrientation(cube_id, [x,y,z], rot)
+    pos, rot = p.getBasePositionAndOrientation(cube_id)
+    
     if parameters.random_rotation:
         rot = rot
     else:
@@ -117,15 +122,15 @@ def random_rotation_and_position(cube_id, plane_id, p, parameters:SceneParameter
                                         math.radians(parameters.rotation_parts[1] / parameters.rotation_fidelity * 360. + parameters.offset ),
                                         math.radians(parameters.rotation_parts[2] / parameters.rotation_fidelity * 360. + parameters.offset)])
     p.resetBasePositionAndOrientation(cube_id, pos, rot)
-    pts = p.getClosestPoints(bodyA=cube_id, bodyB=plane_id, distance=3)
+    pts = p.getClosestPoints(bodyA=cube_id, bodyB=plane_id, distance=10)
     nearest = min(pts, key=lambda c: c[8]) if pts else None
     dist = (np.array(nearest[6]) - np.array(nearest[5]))
     normalized_dist = np.array([0,0,0]) # normalized(dist)
 
     if parameters.random_rotation:
-        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 0.1, rot)
+        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 3, rot)
     else:
-        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 0.1, rot)
+        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 3, rot)
 
 
 def get_min_z(global_vertex_positions):

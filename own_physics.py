@@ -11,7 +11,7 @@ import pybullet as p
 import numpy as np
 import tqdm
 
-from parameters import SceneParameters
+from parameters import Angles, SceneParameters
 from recorder import record_collision, record_collision_empty
 from scene_creator import create_scene, reset_scene, random_rotation_and_position
 
@@ -29,13 +29,49 @@ def _contact_point_velocity(cube_id, contact_pos_world, v_com, omega):
     return np.array(v_com, dtype=np.float64) + np.cross(np.array(omega, dtype=np.float64), r)
 
 
+def apply_impulse_predictor(cube_id, current_linear_vel, current_angular_vel, contact_points):
+    """
+    Net-force / net-torque application: sum all contact contributions, then make
+    a single applyExternalForce + applyExternalTorque call.
+    """
+    cube_pos, _ = p.getBasePositionAndOrientation(cube_id)
+    cube_pos = np.array(cube_pos)
+
+    n_contacts = len(contact_points)
+    if n_contacts == 0:
+        return
+
+    net_force = np.zeros(3)
+    net_torque = np.zeros(3)
+
+    for cp in contact_points:
+        pen = cp[8]
+        normal = cp[7]
+        contact_pos_world = np.array(cp[5])
+
+        v_contact = _contact_point_velocity(
+            cube_id, contact_pos_world, current_linear_vel, current_angular_vel
+        )
+
+        force_vector = np.asarray(calculate_force(normal, pen, cube_id, v_contact.tolist()))
+        force_vector = force_vector / n_contacts
+
+        net_force += force_vector
+        r = contact_pos_world - cube_pos
+        net_torque += np.cross(r, force_vector)
+    #if(np.linalg.norm(net_force) < FORCE_CLAMPING_START):
+    #    net_force  += -REST_LINEAR_DAMPING  * np.array(current_linear_vel)
+    
+    #if(np.linalg.norm(net_torque) < TORQUE_CLAMPING_START):
+    #    net_torque += -REST_ANGULAR_DAMPING * np.array(current_angular_vel)
+
+    p.applyExternalForce(cube_id, -1, net_force.tolist(), cube_pos.tolist(), p.WORLD_FRAME)
+    p.applyExternalTorque(cube_id, -1, net_torque.tolist(), p.WORLD_FRAME)
+
+
 def apply_force(contact_points,
                 current_angular_vel, current_linear_vel,
-                model,
-                prev_angular_vel, prev_linear_vel,
-                cube_id,
-                plane_id,
-                 timestep: float):
+                cube_id,):
 
         for cp in contact_points:
             apply_spring_force(cp[7], cp[8], cp[5], cube_id, current_linear_vel, current_angular_vel)
@@ -136,7 +172,7 @@ def simulate_empty_collisions(p, cube_id, plane_id, collision_data_empty):
 
 
         # Get contact points
-        record_collision_empty(p, plane_id, cube_id, collision_data_empty, current_linear_vel=current_linear_vel)
+        record_collision_empty(p, plane_id, cube_id, collision_data_empty)
         frame += 1
 
 def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters, _physics_client = None, plane_id=None, cube_id=None):
@@ -150,20 +186,24 @@ def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters, _
     collision_point_data = []
     collision_point_data_empty = []
     frame = 0
-    prev_linear_vel = [0, 0, 0]
-    prev_angular_vel = [0, 0, 0]
+    max_frame_wait = 500
+    current_frame_counter = 0
+    is_counting_frames = False
 
     owns_bodies = plane_id is None
     if owns_bodies:
         plane_id, cube_id, timestep = create_scene(p, should_use_gravity, parameters)
     else:
         timestep = 1.0 / 240
-        reset_scene(p, cube_id, should_use_gravity, parameters)
+        reset_scene(p, cube_id, plane_id, should_use_gravity, parameters)
 
     if should_use_gravity:
         pos, orn = p.getBasePositionAndOrientation(cube_id)
         p.resetBasePositionAndOrientation(cube_id, [pos[0], pos[1], random.random() * 4 + 1], orn)
     while frame < max_frames:
+        current_frame_counter += 1
+        if current_frame_counter > max_frame_wait:
+            break
         # Store velocities before simulation step
         current_linear_vel, current_angular_vel = p.getBaseVelocity(cube_id)
 
@@ -174,21 +214,27 @@ def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters, _
         # Get contact points
         contact_points = p.getContactPoints(bodyA=cube_id, bodyB=plane_id)
         if contact_points:
-            record_collision(p, collision_data, collision_point_data, contact_points, frame, plane_id, prev_angular_vel, current_linear_vel,
-                             cube_id)
 
-            apply_force(contact_points, current_angular_vel, current_linear_vel,
-                        None, prev_angular_vel, prev_linear_vel, cube_id, plane_id, timestep)
-            if not should_use_gravity:
-                break
+            contact_points_plane = p.getContactPoints(bodyA=plane_id, bodyB=cube_id)
+            record_collision(p, collision_data, collision_point_data, contact_points, contact_points_plane, frame, cube_id, plane_id)
 
+            apply_impulse_predictor(cube_id, current_angular_vel, current_linear_vel,  contact_points=contact_points)
+
+            contact_points_plane = p.getContactPoints(bodyA=plane_id, bodyB=cube_id)
+            current_linear_vel_plane, current_angular_vel_plane = p.getBaseVelocity(plane_id)
+            apply_impulse_predictor(
+                plane_id, current_linear_vel_plane, current_angular_vel_plane, contact_points_plane
+            )
+
+
+            if not is_counting_frames:
+                is_counting_frames = True
+                current_frame_counter = 0
+            
 
         else:
-            record_collision_empty(p, plane_id, cube_id, collision_point_data_empty, current_linear_vel)
+            record_collision_empty(p, cube_id, plane_id, collision_point_data_empty)
 
-        # Update previous velocities
-        prev_linear_vel = current_linear_vel
-        prev_angular_vel = current_angular_vel
 
         frame += 1
         if connection_type == p.GUI:#
@@ -222,66 +268,69 @@ def simulate_sections(value):
     print(f"x_rot:", x_rot)
     plane_id, cube_id, _ = create_scene(p, False, SceneParameters(random_rotation=True))
     point_data = []
+    for phi in range(0,360,36):
+        for theta in range(0,360,36):
 
-    for y_rot in range(sections):
-        print(f"{x_rot} - 1. y_rot: {y_rot}")
-        for z_rot in range(sections):
-            for vel in range(20):
-                point_data += main(False, MAX_FRAMES_NORMAL,
-                                   SceneParameters((x_rot, y_rot, z_rot), sections, velocity_range=((-10, 10), (-10, 10), (-vel * 0.5, -vel * 0.5 +1)), position_range=(0,0), offset = 0),
-                                   _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
-    with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
-        json.dump(point_data, f, indent=4)
-    point_data = []
-    for y_rot in range(sections):
-        print(f"{x_rot} - 2. y_rot: {y_rot}")
-        for z_rot in range(sections):
-            for vel in range(10):
-                point_data += main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
-                                                            velocity_range=((-10, 10), (-10, 10), (-vel * 0.1-0.01, 0)), position_range=(0,0), offset = 2.5),
-                                                            _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
-    with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
-        json.dump(point_data, f, indent=4)
-    point_data = []
-    for y_rot in range(sections):
-        print(f"{x_rot} - 3. y_rot: {y_rot}")
-        for z_rot in range(sections):
-            for vel in range(-10,0):
-                point_data += main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
-                                                            velocity_range=((-10, 10), (-10, 10), (-vel *0.25, -vel *0.25 - 0.1)), position_range=(0,0), offset = 5),
-                                                            _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
-    with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
-        json.dump(point_data, f, indent=4)
-    point_data = []
-    for y_rot in range(sections):
-        print(f"{x_rot} - 4. y_rot: {y_rot}")
-        for z_rot in range(sections):
-            for vel in range(-20, -5):
-                point_data += main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
-                                                            velocity_range=((-10, 10), (-10, 10), (vel, vel +1)), position_range=(0,0), offset = 7.5),
-                                                            _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
-    with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
-        json.dump(point_data, f, indent=4)
-    point_data = []
+            for y_rot in range(sections):
+                print(f"{x_rot} - 1. y_rot: {y_rot}")
+                for z_rot in range(sections):
+                    for vel in range(20):
+                        point_data += main(False, MAX_FRAMES_NORMAL,
+                                        SceneParameters((x_rot, y_rot, z_rot), sections, velocity_range=(-vel * 0.5, -vel * 0.5 +1), 
+                                                        position_range=(0,0), offset = 0, spawn_angles= Angles(phi, theta)),
+                                        _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
+            with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
+                json.dump(point_data, f, indent=4)
+            point_data = []
+            for y_rot in range(sections):
+                print(f"{x_rot} - 2. y_rot: {y_rot}")
+                for z_rot in range(sections):
+                    for vel in range(10):
+                        point_data += main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                                    velocity_range=(-vel * 0.1-0.01, 0), position_range=(0,0), offset = 2.5, spawn_angles= Angles(phi, theta)),
+                                                                    _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
+            with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
+                json.dump(point_data, f, indent=4)
+            point_data = []
+            for y_rot in range(sections):
+                print(f"{x_rot} - 3. y_rot: {y_rot}")
+                for z_rot in range(sections):
+                    for vel in range(-10,0):
+                        point_data += main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                                    velocity_range=(-vel *0.25, -vel *0.25 - 0.1), position_range=(0,0),spawn_angles= Angles(phi, theta), offset = 5),
+                                                                    _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
+            with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
+                json.dump(point_data, f, indent=4)
+            point_data = []
+            for y_rot in range(sections):
+                print(f"{x_rot} - 4. y_rot: {y_rot}")
+                for z_rot in range(sections):
+                    for vel in range(-20, -5):
+                        point_data += main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                                    velocity_range=(vel, vel +1), position_range=(0,0), offset = 7.5, spawn_angles= Angles(phi, theta)),
+                                                                    _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
+            with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
+                json.dump(point_data, f, indent=4)
+            point_data = []
 
-    for y_rot in range(sections):
-        print(f"{x_rot} - 5. y_rot: {y_rot}")
-        for z_rot in range(sections):
-            for vel in range(-20, -5):
-                point_data += main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
-                                                            velocity_range=((-10, 10), (-10, 10), (vel / 100., (vel +1) / 1000.)), position_range=(0,0), offset = 8),
-                                                            _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
-    with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
-        json.dump(point_data, f, indent=4)
-    point_data = []
+            for y_rot in range(sections):
+                print(f"{x_rot} - 5. y_rot: {y_rot}")
+                for z_rot in range(sections):
+                    for vel in range(-20, -5):
+                        point_data += main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                                    velocity_range=(vel / 100., (vel +1) / 1000.), position_range=(0,0), offset = 8, spawn_angles= Angles(phi, theta)),
+                                                                    _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
+            with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
+                json.dump(point_data, f, indent=4)
+            point_data = []
 
-    for y_rot in range(sections):
-        print(f"{x_rot} - 6. y_rot: {y_rot}")
-        for z_rot in range(sections):
-            for vel in range(20):
-                point_data += main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
-                                                            velocity_range=((-10, 10), (-10, 10), (-vel * 0.5, -vel * 0.5 +1)), position_range=(-vel / 240 * 100,-vel / 240 * 15), offset = 0),
-                                                            _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
+            for y_rot in range(sections):
+                print(f"{x_rot} - 6. y_rot: {y_rot}")
+                for z_rot in range(sections):
+                    for vel in range(20):
+                        point_data += main(False, MAX_FRAMES_NORMAL, SceneParameters((x_rot, y_rot, z_rot), sections,
+                                                                    velocity_range= (-vel * 0.5, -vel * 0.5 +1), position_range=(-vel / 240 * 100,-vel / 240 * 15), offset = 0, spawn_angles= Angles(phi, theta)),
+                                                                    _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
     with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
         json.dump(point_data, f, indent=4)
 
@@ -291,12 +340,21 @@ def simulate_sections(value):
 
 
 if __name__ == "__main__":
-    sections = 25
+    sections = 10
     empty_collisions(SceneParameters(random_rotation = True))
-    for i in tqdm.tqdm(range(1000), "gravity runs"):
-        main(True, 5000, SceneParameters(random_rotation=True))
+    #for i in tqdm.tqdm(range(1000), "gravity runs"):
+    #    main(True, 5000, SceneParameters(random_rotation=True))
+    #physics_client = p.connect(p.GUI)
+    #plane_id, cube_id, _ = create_scene(p, False, SceneParameters(random_rotation=True))
 
-    with multiprocessing.Pool(processes=sections) as pool:
+    #main(False, MAX_FRAMES_NORMAL,
+    #            SceneParameters((0, 0, 0), sections, velocity_range=(0, 1), 
+    #            position_range=(0,0), offset = 0, spawn_angles= Angles(0, 0)),
+    #                                    _physics_client=physics_client, plane_id=plane_id, cube_id=cube_id)
+
+    #for x_rot in range(sections):
+    #    simulate_sections((x_rot, sections))
+    with multiprocessing.Pool(processes=10) as pool:
         ans = pool.map(simulate_sections, [(x_rot, sections) for x_rot in range(sections)])
     #for x_rot in tqdm.tqdm(range(45), "x"):
     #    for y_rot in range(45):
