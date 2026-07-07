@@ -1,24 +1,15 @@
-import json
-import random
-import time
-from pyexpat import features
-from typing import Any
-
-import torch
 import math
-import pybullet as p
+import time
+
 import numpy as np
-import tqdm
+import pybullet as p
+import torch
+import trimesh
 
 from base_demo import FORCE_CLAMPING_START, REST_ANGULAR_DAMPING, REST_LINEAR_DAMPING, TORQUE_CLAMPING_START
-from models.gnn_model_simple import make_fast_predictor
-from own_physics import calculate_force
+from models.mlp_model_pooling import make_fast_predictor
 from parameters import SceneParameters
-from recorder import record_collision, record_collision_empty
-from scene_creator import create_scene, random_quaternion
-import time
-import trimesh
-import numpy as np
+from scene_creator import create_scene
 
 SPRING_CONSTANT = 1000  # N/m
 DAMPENING = 0.9
@@ -41,19 +32,9 @@ print(mesh.vertices.shape)
 vertice_positions = np.array(mesh.vertices)
 num_vertices = len(mesh.vertices)
 
-# Build edge index from mesh faces (undirected)
-faces = np.array(mesh.faces)
-edges = np.concatenate([
-    faces[:, [0, 1]], faces[:, [1, 0]],
-    faces[:, [1, 2]], faces[:, [2, 1]],
-    faces[:, [0, 2]], faces[:, [2, 0]],
-], axis=0)
-edges = np.unique(edges, axis=0)
-edge_index = torch.tensor(edges.T, dtype=torch.long)
 
-
-all_impulse_predictor = make_fast_predictor(num_vertices=num_vertices)
-checkpoint = torch.load("checkpoints/wrench_model_phys_vertices_gnn_simple.pth", map_location="cpu")
+all_impulse_predictor = make_fast_predictor(num_vertices=502)
+checkpoint = torch.load("checkpoints/wrench_model_best_vertices.pth", map_location="cpu")
 state_dict = {k.removeprefix("_orig_mod."): v for k, v in checkpoint['model_state_dict'].items()}
 all_impulse_predictor.load_state_dict(state_dict)
 all_impulse_predictor.eval()  # Set to evaluation mode
@@ -64,36 +45,28 @@ target_stats = checkpoint.get('target_stats')
 
 
 
+
 def apply_impulse_predictor(cube_id, current_linear_vel, current_angular_vel, relative_pos, relative_rot):
-    # GCN model uses 9-D state: [rel_x, rel_y, rel_z, sin_r, cos_r, sin_p, cos_p, sin_y, cos_y]
-    # Linear and angular velocity are passed separately, not baked into the state vector.
+    features = []
+    features.extend(current_linear_vel)          # 3 values<
+    features.extend(current_angular_vel)         # 3 values<
+    features.extend([relative_pos[2]])     # 3 values
     roll, pitch, yaw = relative_rot
-    state = [
-        relative_pos[0], relative_pos[1], relative_pos[2],
-        math.sin(roll), math.cos(roll),
-        math.sin(pitch), math.cos(pitch),
-        math.sin(yaw), math.cos(yaw),
-    ]
+    features.extend([math.sin(roll), math.cos(roll),
+            math.sin(pitch), math.cos(pitch),
+            math.sin(yaw), math.cos(yaw)])               # 3 values (roll, pitch, yaw)
 
-    # Broadcast one state row to every node: [N, 9]
-    state_tensor = torch.FloatTensor(state).unsqueeze(0).expand(num_vertices, -1).contiguous()
-
-    v_lin_tensor = torch.FloatTensor(list(current_linear_vel)).unsqueeze(0)   # [1, 3]
-    v_ang_tensor = torch.FloatTensor(list(current_angular_vel)).unsqueeze(0)  # [1, 3]
+    features_tensor = torch.FloatTensor(features).unsqueeze(0)  # (1, 13)
 
     cube_pos, _ = p.getBasePositionAndOrientation(cube_id)
     cube_pos = np.array(cube_pos)
-    body_pos_tensor = torch.tensor(cube_pos, dtype=torch.float32).unsqueeze(0)  # [1, 3]
+    body_pos_tensor = torch.tensor(cube_pos, dtype=torch.float32).unsqueeze(0)  # (1, 3)
 
     with torch.no_grad():
         predictions = all_impulse_predictor(
-            state_tensor,
-            edge_index,
+            features_tensor,
             torch.tensor(vertice_positions, dtype=torch.float32),
-            v_lin_tensor,
-            v_ang_tensor,
             body_position=body_pos_tensor,
-            batch_size=1,
         )
 
     print(predictions)
@@ -131,13 +104,13 @@ def main():
 
     frame = 0
     plane_id,  cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
-    initial_orientation = p.getQuaternionFromEuler([-math.pi / 4, 0, 0.0])
+    #initial_orientation = p.getQuaternionFromEuler([math.pi/2, 0, 0.0])
 
-    p.resetBasePositionAndOrientation(
-        cube_id,
-        p.getBasePositionAndOrientation(cube_id)[0],
-        initial_orientation
-    )
+    #p.resetBasePositionAndOrientation(
+    #    cube_id,
+    #    p.getBasePositionAndOrientation(cube_id)[0],
+    #    initial_orientation
+    #)
     p.resetBaseVelocity(
         cube_id,
         linearVelocity=[0, 0, 0],
@@ -148,7 +121,7 @@ def main():
 
     log_id = p.startStateLogging(
         p.STATE_LOGGING_VIDEO_MP4,
-        "collision_run_simple_gnn2.mp4"
+        "collision_run_vertices.mp4"
     )
 
     # Disable ALL collisions for plane

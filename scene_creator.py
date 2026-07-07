@@ -46,7 +46,7 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
     #)
 
     cube_id = p.loadURDF(
-        "/home/niklas/Dokumente/privat/repositories/py_bullet/blender_models/bunny.urdf",
+        "/home/niklas/Documents/privat/repositories/py_bullet/blender_models/bunny.urdf",
         basePosition=[0, 0, 0.5],
         baseOrientation=random_quaternion()
     )

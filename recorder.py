@@ -45,7 +45,7 @@ def to_vector(list_vector):
     return output
 
 
-def record_collision(p, collision_data: list[Any], collision_points: list[Any], contact_points, frame: int, plane_id,
+def record_collision(p, run_id, collision_data: list[Any], collision_points: list[Any], contact_points, frame: int, plane_id,
                      prev_angular_vel: list[int] | Any,
                      current_linear_vel: list[int] | Any, sphere_id):
     from own_physics import calculate_force, _contact_point_velocity
@@ -116,6 +116,7 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any], 
         })
 
     collision_entry = {
+        "run_id":run_id,
         "frame": frame,
         "linear_velocity": {
             "x": float(current_linear_vel[0]),
@@ -189,6 +190,8 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any], 
 
     # Store a simpler summary for collision points if needed
     collision_point_entry = {
+        "run_id": run_id,
+        "frame": frame,
         "self_position": {
             "x": float(sphere_pos[0]),
             "y": float(sphere_pos[1]),
@@ -243,7 +246,7 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any], 
 
     collision_points.append(collision_point_entry)
 
-def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points:list[Any], current_linear_vel:list):
+def record_collision_empty(p, run_id, frame:int, plane_id: int, cube_id:int, empty_collision_points:list[Any], current_linear_vel:list):
     # Get current state after collision
     pos, quat = p.getBasePositionAndOrientation(cube_id)
 
@@ -268,7 +271,8 @@ def record_collision_empty(p, plane_id: int, cube_id:int, empty_collision_points
     _, angular_vel = p.getBaseVelocity(cube_id)
 
 
-
+    collision_point_entry["run_id"] = run_id
+    collision_point_entry["frame"] = frame
     collision_point_entry["self_position"] = {
         "x": float(pos[0]),
         "y": float(pos[1]),

@@ -22,6 +22,8 @@ GRAVITY_RUNS = 0
 MAX_FRAMES_GRAVITY = 0
 MAX_FRAMES_NORMAL = 500
 MAX_FRAMES_TO_RECORD = 100
+
+run_id = 0
 def _contact_point_velocity(cube_id, contact_pos_world, v_com, omega):
     """Velocity at the contact point: v_com + omega × r."""
     cube_pos, _ = p.getBasePositionAndOrientation(cube_id)
@@ -101,6 +103,8 @@ def empty_collisions(scene_parameters:SceneParameters):
 
 
 def simulate_empty_collisions(p, cube_id, plane_id, collision_data_empty):
+    global run_id
+    run_id += 1
     # Connect to PyBullet
     pos, orn = p.getBasePositionAndOrientation(cube_id)
     orn = p.getQuaternionFromEuler([
@@ -136,10 +140,12 @@ def simulate_empty_collisions(p, cube_id, plane_id, collision_data_empty):
 
 
         # Get contact points
-        record_collision_empty(p, plane_id, cube_id, collision_data_empty, current_linear_vel=current_linear_vel)
+        record_collision_empty(p, run_id, frame, plane_id, cube_id, collision_data_empty, current_linear_vel=current_linear_vel)
         frame += 1
 
 def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters, _physics_client = None, plane_id=None, cube_id=None):
+    global run_id
+    run_id += 1
     if _physics_client is None:
         physics_client = p.connect(p.DIRECT)
     else:
@@ -174,7 +180,7 @@ def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters, _
         # Get contact points
         contact_points = p.getContactPoints(bodyA=cube_id, bodyB=plane_id)
         if contact_points:
-            record_collision(p, collision_data, collision_point_data, contact_points, frame, plane_id, prev_angular_vel, current_linear_vel,
+            record_collision(p, run_id, collision_data, collision_point_data, contact_points, frame, plane_id, prev_angular_vel, current_linear_vel,
                              cube_id)
 
             apply_force(contact_points, current_angular_vel, current_linear_vel,
@@ -184,7 +190,7 @@ def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters, _
 
 
         else:
-            record_collision_empty(p, plane_id, cube_id, collision_point_data_empty, current_linear_vel)
+            record_collision_empty(p, run_id, frame, plane_id, cube_id, collision_point_data_empty, current_linear_vel)
 
         # Update previous velocities
         prev_linear_vel = current_linear_vel
@@ -196,9 +202,8 @@ def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters, _
 
     # Save collision data to JSON file
     num_collision_points = min(MAX_FRAMES_TO_RECORD, len(collision_point_data))
-    random.shuffle(collision_point_data_empty)
-    random.shuffle(collision_point_data)
-    collision_point_data = collision_point_data[:MAX_FRAMES_TO_RECORD]
+    starting_frame = random.randint(0, max(0,len(collision_point_data) - MAX_FRAMES_TO_RECORD))
+    collision_point_data = collision_point_data[starting_frame:starting_frame + MAX_FRAMES_TO_RECORD]
     for i in range(num_collision_points):
         if i < len(collision_point_data_empty):
             collision_point_data.append(collision_point_data_empty[i])
@@ -206,7 +211,6 @@ def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters, _
         with open(f"logs/collision_points_{time.time()}-{os.getpid()}.json", 'w') as f:
             json.dump(collision_point_data, f, indent=4)
         with open(f'logs/collision_data-{time.time()}-{os.getpid()}.json', 'w') as f:
-            random.shuffle(collision_data)
             json.dump(collision_data[:MAX_FRAMES_TO_RECORD], f, indent=4)
         p.disconnect()
     elif owns_bodies:
@@ -292,12 +296,12 @@ def simulate_sections(value):
 
 if __name__ == "__main__":
     sections = 25
-    empty_collisions(SceneParameters(random_rotation = True))
-    for i in tqdm.tqdm(range(1000), "gravity runs"):
+    #empty_collisions(SceneParameters(random_rotation = True))
+    for i in tqdm.tqdm(range(4000), "gravity runs"):
         main(True, 5000, SceneParameters(random_rotation=True))
 
-    with multiprocessing.Pool(processes=sections) as pool:
-        ans = pool.map(simulate_sections, [(x_rot, sections) for x_rot in range(sections)])
+    #with multiprocessing.Pool(processes=sections) as pool:
+    #    ans = pool.map(simulate_sections, [(x_rot, sections) for x_rot in range(sections)])
     #for x_rot in tqdm.tqdm(range(45), "x"):
     #    for y_rot in range(45):
     #        for z_rot in range(45):
