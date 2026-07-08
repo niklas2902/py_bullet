@@ -1,9 +1,5 @@
 import torch
 import torch.nn as nn
-
-from torch_geometric.nn import global_max_pool as gmp
-from torch_geometric.nn import SGConv
-
 import torch.nn.functional as F
 
 HEAD_OUT_DIM = 11  # 1 (collision) + 1 (depth) + 3 (force_residual) + 3 (normal) + 3 (lever)
@@ -33,22 +29,6 @@ class WrenchPredictor(nn.Module):
     Predicts net wrench (force + torque) with a head whose force assembly
     matches the physics sim, plus a learned residual to absorb deviations
     the analytical model cannot express.
-
-    Sim-matching part:
-        F_spring  = -k * depth                        (depth <= 0)
-        F_damping = -c * (v . n),  c = 2*sqrt(k*m)*b
-        F_mag     = max(F_spring + F_damping, 0)      (hard clamp, no softplus)
-        F_normal  = F_mag * n                         (along contact normal)
-
-    Residual:
-        F_vec     = F_normal + force_residual         (3-vec correction, unconstrained)
-        T_vec     = lever x F_vec
-
-    NOTE: `input_dim` here is the *full* feature size going into the MLP,
-    which in this variant is the per-sample state (13) PLUS the flattened
-    per-vertex world-space features. `forward` still slices the linear
-    velocity out of the FIRST 3 entries, which we keep as v_lin convention
-    so the damping term is well-defined.
     """
 
     def __init__(self, input_dim=13, width=256, num_blocks=5,
@@ -92,15 +72,6 @@ class WrenchPredictor(nn.Module):
         )
 
     def forward(self, x, velocity):
-        """
-        Args:
-            x:        [B, input_dim]  full feature vector going into the MLP
-                                       (sample state + flattened vertex features).
-            velocity: [B, 3]           body linear velocity in world frame, used
-                                       for the Hooke damping term. Passed in
-                                       explicitly so the slicing convention is
-                                       robust to whatever `x` actually contains.
-        """
         h = self.input_proj(x)
         h = self.backbone(h)
 
@@ -109,31 +80,21 @@ class WrenchPredictor(nn.Module):
             [1, 1, 3, 3, 3], dim=-1
         )
 
-        # Match sim: mass clamped to >= 1e-6, k positive.
         k_pos    = F.softplus(self.k)     if self.k.requires_grad else self.k
         mass_pos = F.softplus(self.mass)  if self.mass.requires_grad else self.mass
         mass_pos = torch.clamp(mass_pos, min=1e-6)
         bounciness = torch.sigmoid(self.bounciness)
 
-        # Critical damping
         c = 2.0 * torch.sqrt(k_pos * mass_pos) * bounciness
 
-        # Match sim's `min(penetration, 0.0)`: allow exact zero, clamp positives.
         depth = torch.clamp(depth_raw, max=0.0)
-
-        # Normalize the contact normal (sim does the same defensively).
         contact_normal = F.normalize(normal_raw, dim=-1, eps=1e-8)
 
         F_spring = -k_pos * depth
-
-        # Damping force along the normal.
         vel_normal = (velocity * contact_normal).sum(dim=-1, keepdim=True)
         F_damping = -c * vel_normal
-
-        # Sim uses a hard clamp at 0 — never sucks objects into surfaces.
         F_mag = F.relu(F_spring + F_damping)
 
-        # Sim-matching normal force, plus learned residual correction.
         force_normal = F_mag * contact_normal
         force_vec    = force_normal + force_residual
         torque_vec   = torch.cross(lever, force_vec, dim=-1)
@@ -161,76 +122,103 @@ class WrenchPredictor(nn.Module):
 # --------------------------------------------------------------------------
 # World-space vertex transform
 # --------------------------------------------------------------------------
-# Feature layout (13-D, set by ContactDataset):
-#   0:3   linear velocity     v_lin       (world frame)
-#   3:6   angular velocity    omega       (world frame)
-#   6     rel_pos_z           (height above plane)
-#   7:9   (sin roll,  cos roll)
-#   9:11  (sin pitch, cos pitch)
-#   11:13 (sin yaw,   cos yaw)
-#
-# Rotation matrix is built directly from sin/cos pairs — no atan2 round-trip
-# needed. Convention: intrinsic Z-Y-X (yaw, then pitch, then roll), i.e.
-#     R = Rz(yaw) @ Ry(pitch) @ Rx(roll)
-# which is what Blender exports for X-Y-Z Euler angles (the most common
-# default). If the sim uses a different order, change `_rotmat_from_sincos`.
 LIN_VEL_SLICE = slice(0, 3)
 ANG_VEL_SLICE = slice(3, 6)
-ROLL_SC_SLICE  = slice(7, 9)    # (sin, cos)
+ROLL_SC_SLICE  = slice(7, 9)
 PITCH_SC_SLICE = slice(9, 11)
 YAW_SC_SLICE   = slice(11, 13)
 
 
 def _rotmat_from_sincos(features: torch.Tensor) -> torch.Tensor:
-    sr, cr = features[:, 1:2], features[:, 2:3]
-    sp, cp = features[:, 3:4], features[:, 4:5]
-    sy, cy = features[:, 5:6], features[:, 6:7]
+    """[B, F] feature batch -> [B, 3, 3] rotation matrix.
 
-    row0 = torch.cat([cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr], dim=-1)
-    row1 = torch.cat([sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr], dim=-1)
-    row2 = torch.cat([-sp,   cp*sr,            cp*cr],            dim=-1)
+    Z-Y-X intrinsic: R = Rz(yaw) Ry(pitch) Rx(roll).
+    """
+    sr, cr = features[:, 7:8],  features[:, 8:9]
+    sp, cp = features[:, 9:10], features[:, 10:11]
+    sy, cy = features[:, 11:12], features[:, 12:13]
+
+    row0 = torch.cat([cy * cp,             cy * sp * sr - sy * cr,  cy * sp * cr + sy * sr], dim=-1)
+    row1 = torch.cat([sy * cp,             sy * sp * sr + cy * cr,  sy * sp * cr - cy * sr], dim=-1)
+    row2 = torch.cat([-sp,                 cp * sr,                 cp * cr               ], dim=-1)
     return torch.stack([row0, row1, row2], dim=1)
 
-class GCNWrench(nn.Module):
-    VERT_GEOM_DIM = 10
-    POOLED_N = 200
 
-    def __init__(self, in_channels, hidden_channels, out_channels, num_vertices):
+class VertexMLPWrench(nn.Module):
+    VERT_GEOM_DIM = 16
+
+    def __init__(self, state_dim: int = 13,
+                 nodes_per_graph: int = None,
+                 width: int = 256, num_blocks: int = 5,
+                 encoder_dim: int = 256):
         super().__init__()
-        self.num_vertices = num_vertices
-        self.conv = SGConv(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            K=5,
-            cached=False,
-            add_self_loops=False,
-            bias=True,
-        )
-        self.out_channels = out_channels
-        self.head = WrenchPredictor(
-            input_dim=6 + out_channels,
-            width=256, num_blocks=5,
-        )
-    def forward(self, x, edge_index, vertex_pos, v_lin, v_ang, batch_size, body_position=None):
-        B = x.size(0) // self.num_vertices
-        x_per_sample = x.view(B, self.num_vertices, -1)[:, 0, :]                # [B, in_channels]
-        R = _rotmat_from_sincos(x_per_sample)                   # [B, 3, 3]
+        self.N = nodes_per_graph
+        self.state_dim = state_dim
+        self.encoder_dim = encoder_dim
 
-        # Local vertices in world frame
-        vp_local = vertex_pos.unsqueeze(0).expand(B, self.num_vertices, 3)      # [B, N, 3]
-        vp_world = torch.einsum("bij,bnj->bni", R, vp_local)    # [B, N, 3]
+        # Encoder over the flattened all-vertex feature vector. Takes the
+        # [B, N*16] block down to a fixed-size embedding before the head.
+        flat_vert_dim = self.N * self.VERT_GEOM_DIM
+        self.vertex_encoder = nn.Sequential(
+            nn.Linear(flat_vert_dim, encoder_dim),
+            nn.LayerNorm(encoder_dim),
+            nn.GELU(),
+            ResBlock(encoder_dim),
+        )
+
+        self.head = WrenchPredictor(
+            input_dim=state_dim + encoder_dim,
+            width=width, num_blocks=num_blocks,
+        )
+
+    def forward(self, features, vertex_pos, body_position=None):
+        B = features.size(0)
+        N = vertex_pos.size(0)
+
+        R = _rotmat_from_sincos(features)
+
+        # All vertices, transformed into world frame.
+        vp_local = vertex_pos.unsqueeze(0).expand(B, N, 3)         # [B, N, 3]
+        vp_world = torch.einsum("bij,bnj->bni", R, vp_local)
+
         if body_position is not None:
             vp_world = vp_world + body_position.unsqueeze(1)
 
-        h = self.conv(x, edge_index)
-        batch = torch.arange(B, device=x.device).repeat_interleave(self.num_vertices)
+        v_lin = features[:, LIN_VEL_SLICE].unsqueeze(1).expand(B, N, 3)
+        v_ang = features[:, ANG_VEL_SLICE].unsqueeze(1).expand(B, N, 3)
+        vp_world, vp_local, v_lin, v_ang = select_vertices(vp_world, vp_local, v_lin, v_ang, 502)
+        N = vp_world.size(1)
+        world_z = vp_world[..., 2:3]                               # [B, N, 1]
+
+        vertex_vel = v_lin + torch.cross(v_ang, vp_world, dim=-1)
+
+        vert_feats = torch.cat([
+            vp_local, vp_world, world_z, vertex_vel, v_lin, v_ang
+        ], dim=-1)                                                 # [B, N, 16]
+
+        # Flatten all vertices, then encode down to a fixed embedding.
+        flat_verts = vert_feats.reshape(B, N * self.VERT_GEOM_DIM)  # [B, N*16]
+        graph_embed = self.vertex_encoder(flat_verts)              # [B, encoder_dim]
+
+        x = torch.cat([features, graph_embed], dim=-1)
+        return self.head(x, velocity=features[:, LIN_VEL_SLICE])
 
 
-        pooled = gmp(h, batch, size=batch_size)
-        head_input = torch.cat([v_lin, v_ang, pooled], dim=-1)
-        return self.head(head_input, velocity=v_lin)
+def select_vertices(vertex_pos_world, vp_local, v_lin, v_ang, num_vertices):
+    # vertex_pos_world: [B, N, 3] -> [B, num_vertices, 3]
+    order = vertex_pos_world[..., 1].argsort(dim=-1)        # [B, N]
+    order = order[..., :num_vertices]                        # [B, num_vertices]
+    idx = order.unsqueeze(-1).expand(-1, -1, 3)              # [B, num_vertices, 3]
+    return torch.gather(vertex_pos_world, 1, idx),torch.gather(vp_local, 1, idx), torch.gather(v_lin, 1, idx), torch.gather(v_ang, 1, idx)
 
+# --- usage in the module ---
 
-def make_fast_predictor(input_dim=9, width=128, output_dim=64, num_blocks=5, baseline_k=1e3, num_vertices=None):
-    model = GCNWrench(in_channels=input_dim, hidden_channels=width, out_channels=output_dim, num_vertices=num_vertices)
+def make_fast_predictor(input_dim=13, width=256, num_blocks=5,
+                        encoder_dim=256, num_vertices = None):
+    model = VertexMLPWrench(
+        state_dim=input_dim,
+        nodes_per_graph=num_vertices,
+        width=width, num_blocks=num_blocks,
+        encoder_dim=encoder_dim,
+    )
     return model

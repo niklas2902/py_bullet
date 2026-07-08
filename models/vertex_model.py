@@ -192,102 +192,123 @@ def _rotmat_from_sincos(features: torch.Tensor) -> torch.Tensor:
     row2 = torch.cat([-sp,                 cp * sr,                 cp * cr               ], dim=-1)
     return torch.stack([row0, row1, row2], dim=1)
 
-
 class VertexMLPWrench(nn.Module):
-    """
-    Vertex-transform MLP (no GNN).
+    VERT_GEOM_DIM = 16
 
-    For each sample we:
-      1. Build the body's rotation matrix from the sin/cos features.
-      2. Rotate each local vertex into world space, optionally translating
-         by `body_position`.
-      3. Compute the per-vertex world-frame velocity v_lin + omega x r_world
-         (the actual physical velocity at that vertex on the rigid body).
-      4. Concatenate, per vertex:
-           local_xyz (3) + world_xyz (3) + world_z (1) + vel_at_vertex (3)  = 10
-         and FLATTEN across all N vertices into a single fixed-size vector
-         of length N * 10. This is concatenated with the original per-sample
-         state (13-D) and fed into `WrenchPredictor`.
-
-    There is no message passing and no notion of mesh edges in this model —
-    the MLP sees the vertices as a fixed-order positional feature bank, and
-    learns whatever spatial structure it needs to from training data.
-    """
-    # local(3) + world(3) + world_z(1) + vel_at_vertex(3) = 10 per vertex
-    VERT_GEOM_DIM = 10
-
-    def __init__(self, state_dim: int = 13, nodes_per_graph: int = None,
-                 width: int = 256, num_blocks: int = 5):
+    def __init__(self, state_dim: int = 13,
+                 nodes_per_graph: int = None,
+                 width: int = 256, num_blocks: int = 5,
+                 pooled_n: int = 128,
+                 vert_embed_dim: int = 256):
         super().__init__()
         self.N = nodes_per_graph
+        self.pooled_n = pooled_n
         self.state_dim = state_dim
-        flat_vert_dim = self.N * self.VERT_GEOM_DIM
+        self.vert_embed_dim = vert_embed_dim
+
+        # Shared per-vertex encoder (pure MLP, no neighborhood mixing).
+        self.vertex_encoder = nn.Sequential(
+            nn.Linear(self.VERT_GEOM_DIM, vert_embed_dim),
+            nn.LayerNorm(vert_embed_dim),
+            nn.GELU(),
+            ResBlock(vert_embed_dim),
+        )
+
+        # max + penetration-weighted mean -> 2 * vert_embed_dim graph embedding.
+        graph_embed_dim = 2 * vert_embed_dim
         self.head = WrenchPredictor(
-            input_dim=state_dim + flat_vert_dim,
+            input_dim=state_dim + graph_embed_dim,
             width=width, num_blocks=num_blocks,
         )
 
     def forward(self, features, vertex_pos, body_position=None):
-        """
-        Args:
-            features:      [B, state_dim] per-sample state vector
-                           (the 13-D ContactDataset feature).
-            vertex_pos:    [N, 3] local-frame OBJ vertex positions
-                           (shared across the batch — the rest pose).
-            body_position: [B, 3] world-frame position of each body's
-                           origin (= `self_position` in the dataset, the
-                           same point the torque target was computed about).
-                           If None, no translation is applied (body at origin).
-
-        Returns:
-            WrenchPredictor output dict.
-        """
         B = features.size(0)
-        N = self.N
+        K = self.pooled_n
 
-        # --- Per-sample rotation matrix from the sin/cos features ---
-        R = _rotmat_from_sincos(features)               # [B, 3, 3]
+        R = _rotmat_from_sincos(features)
 
-        # --- Place local vertices in world space ---
-        vp_local = vertex_pos.unsqueeze(0).expand(B, N, 3)  # [B, N, 3]
+        vp_local_k, vp_world_k, idx = select_contact_vertices(
+            vertex_pos, R, K, body_position=body_position, stable_order=True
+        )
+        Kc = vp_world_k.size(1)
 
-        # World rotation: for each b, n: world_n_i = sum_j R[b, i, j] * vp_local[b, n, j]
-        vp_world = torch.einsum("bij,bnj->bni", R, vp_local)  # [B, N, 3]
+        world_z = vp_world_k[..., 2:3]                              # [B, Kc, 1]
 
-        if body_position is not None:
-            vp_world = vp_world + body_position.unsqueeze(1)  # broadcast over N
+        v_lin = features[:, LIN_VEL_SLICE].unsqueeze(1).expand(B, Kc, 3)
+        v_ang = features[:, ANG_VEL_SLICE].unsqueeze(1).expand(B, Kc, 3)
+        vertex_vel = v_lin + torch.cross(v_ang, vp_world_k, dim=-1)
 
-        # --- Velocity at each vertex: v_at_vertex = v_lin + omega x r_world ---
-        # r_world here is the lever from the body origin: rotated, NOT translated
-        # (so this lives in the same frame as the torque target's lever).
-        v_lin   = features[:, LIN_VEL_SLICE].unsqueeze(1)   # [B, 1, 3]
-        omega   = features[:, ANG_VEL_SLICE].unsqueeze(1)   # [B, 1, 3]
-        r_world = torch.einsum("bij,bnj->bni", R, vp_local) # [B, N, 3]
-        vel_at_vertex = v_lin + torch.cross(
-            omega.expand_as(r_world), r_world, dim=-1)      # [B, N, 3]
-
-        # --- Per-vertex geometric features, stacked then flattened ---
-        # [B, N, 10] -> [B, N*10]
         vert_feats = torch.cat([
-            vp_local,                # local xyz                 (3)
-            vp_world,                # world xyz                 (3)
-            vp_world[..., 2:3],      # explicit height           (1)
-            vel_at_vertex,           # per-vertex world velocity (3)
-        ], dim=-1)                                            # [B, N, 10]
-        vert_flat = vert_feats.reshape(B, N * self.VERT_GEOM_DIM)
+            vp_local_k, vp_world_k, world_z, vertex_vel, v_lin, v_ang
+        ], dim=-1)                                                  # [B, Kc, 16]
 
-        # Concat original state + flattened vertex bank -> single MLP input.
-        x = torch.cat([features, vert_flat], dim=-1)          # [B, state_dim + N*10]
+        h = self.vertex_encoder(vert_feats)                         # [B, Kc, E]
 
-        # Pass the body's linear velocity through explicitly so the Hooke
-        # damping term in the head doesn't depend on the layout of `x`.
+        # --- penetration weight: only vertices below the plane contribute ---
+        penetration = F.relu(-world_z)                              # [B, Kc, 1]
+        pen_sum = penetration.sum(dim=1, keepdim=True).clamp_min(1e-6)
+        pen_w = penetration / pen_sum                               # [B, Kc, 1]
+
+        # --- two pooling branches ---
+        h_max = h.amax(dim=1)                                       # [B, E]
+        h_mean = (h * pen_w).sum(dim=1)                             # [B, E]  (penetration-weighted)
+
+        graph_embed = torch.cat([h_max, h_mean], dim=-1)           # [B, 2E]
+
+        x = torch.cat([features, graph_embed], dim=-1)
         return self.head(x, velocity=features[:, LIN_VEL_SLICE])
 
 
-def make_fast_predictor(num_vertices, input_dim=13, width=512, num_blocks=5):
+def select_contact_vertices(vertex_pos, R, K, body_position=None, stable_order=True):
+    """Select the K lowest (most penetrating) vertices and return their geometry.
+
+    Args:
+        vertex_pos:    [N, 3] mesh vertices in local frame.
+        R:             [B, 3, 3] rotation matrices.
+        K:             number of vertices to keep.
+        body_position: [B, 3] or None. If given, world position offset.
+        stable_order:  if True, sort survivors by buffer index. With pooling this
+                       no longer matters for correctness (pool is permutation
+                       invariant) but it is cheap and harmless.
+
+    Returns:
+        vp_local_k: [B, K, 3]  selected vertices in the local body frame
+        vp_world_k: [B, K, 3]  same vertices rotated (+translated) into world
+        idx:        [B, K]     selected vertex indices (for debugging/masking)
+    """
+    B = R.size(0)
+    N = vertex_pos.size(0)
+    vp_local = vertex_pos.unsqueeze(0).expand(B, N, 3)            # [B, N, 3]
+
+    # Cheap height-only pass: world Z = R[2,:] . vp_local
+    z_world = torch.einsum("bj,bnj->bn", R[:, 2, :], vp_local)    # [B, N]
+    if body_position is not None:
+        z_world = z_world + body_position[:, 2:3]
+
+    # Bottom-K: lowest / most penetrating vertices.
+    K = min(K, N)
+    _, idx = torch.topk(z_world, K, dim=1, largest=False)        # [B, K]
+    if stable_order:
+        idx, _ = idx.sort(dim=1)
+
+    # Gather survivors, transform only those.
+    gather_idx = idx.unsqueeze(-1).expand(B, K, 3)
+    vp_local_k = torch.gather(vp_local, 1, gather_idx)           # [B, K, 3]
+    vp_world_k = torch.einsum("bij,bnj->bni", R, vp_local_k)
+    if body_position is not None:
+        vp_world_k = vp_world_k + body_position.unsqueeze(1)
+
+    return vp_local_k, vp_world_k, idx
+
+
+# --- usage in the module ---
+
+def make_fast_predictor(input_dim=13, width=256, num_blocks=5,
+                        pooled_n=256, vert_embed_dim=256, num_vertices=None):
     model = VertexMLPWrench(
         state_dim=input_dim,
         nodes_per_graph=num_vertices,
         width=width, num_blocks=num_blocks,
+        pooled_n=pooled_n, vert_embed_dim=vert_embed_dim,
     )
     return model
