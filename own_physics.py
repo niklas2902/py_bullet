@@ -140,9 +140,11 @@ def simulate_empty_collisions(p, cube_id, plane_id, collision_data_empty):
 
 
         # Get contact points
-        record_collision_empty(p, run_id, frame, plane_id, cube_id, collision_data_empty, current_linear_vel=current_linear_vel)
+        record_collision_empty(p, get_run_id(), frame, plane_id, cube_id, collision_data_empty, current_linear_vel=current_linear_vel)
         frame += 1
 
+def get_run_id():
+    return str(os.getpid()) + "-"+str(run_id)
 def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters, _physics_client = None, plane_id=None, cube_id=None):
     global run_id
     run_id += 1
@@ -180,7 +182,7 @@ def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters, _
         # Get contact points
         contact_points = p.getContactPoints(bodyA=cube_id, bodyB=plane_id)
         if contact_points:
-            record_collision(p, run_id, collision_data, collision_point_data, contact_points, frame, plane_id, prev_angular_vel, current_linear_vel,
+            record_collision(p, get_run_id(), collision_data, collision_point_data, contact_points, frame, plane_id, prev_angular_vel, current_linear_vel,
                              cube_id)
 
             apply_force(contact_points, current_angular_vel, current_linear_vel,
@@ -190,7 +192,7 @@ def main(should_use_gravity:bool, max_frames:int, parameters: SceneParameters, _
 
 
         else:
-            record_collision_empty(p, run_id, frame, plane_id, cube_id, collision_point_data_empty, current_linear_vel)
+            record_collision_empty(p, get_run_id(), frame, plane_id, cube_id, collision_point_data_empty, current_linear_vel)
 
         # Update previous velocities
         prev_linear_vel = current_linear_vel
@@ -296,12 +298,12 @@ def simulate_sections(value):
 
 if __name__ == "__main__":
     sections = 25
-    #empty_collisions(SceneParameters(random_rotation = True))
-    for i in tqdm.tqdm(range(4000), "gravity runs"):
+    empty_collisions(SceneParameters(random_rotation = True))
+    for i in tqdm.tqdm(range(1000), "gravity runs"):
         main(True, 5000, SceneParameters(random_rotation=True))
 
-    #with multiprocessing.Pool(processes=sections) as pool:
-    #    ans = pool.map(simulate_sections, [(x_rot, sections) for x_rot in range(sections)])
+    with multiprocessing.Pool(processes=sections) as pool:
+        ans = pool.map(simulate_sections, [(x_rot, sections) for x_rot in range(sections)])
     #for x_rot in tqdm.tqdm(range(45), "x"):
     #    for y_rot in range(45):
     #        for z_rot in range(45):
