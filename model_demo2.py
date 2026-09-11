@@ -17,9 +17,9 @@ from recorder import record_collision, record_collision_empty
 from scene_creator import create_scene, random_quaternion
 import time
 
-SPRING_CONSTANT = 1000  # N/m
+SPRING_CONSTANT = 100000  # N/m
 DAMPENING = 0.9
-BOUNCINESS_FACTOR = 0.3
+BOUNCINESS_FACTOR = 0
 MAX_RUNS = 60000
 GRAVITY_RUNS = 200
 MAX_FRAMES = 2000
@@ -99,20 +99,8 @@ def main():
     connection_type = p.getConnectionInfo(physics_client)['connectionMethod']
 
     frame = 0
-    plane_id,  cube_id, timestep = create_scene(p, True, SceneParameters(random_rotation = True))
+    plane_id,  cube_id, timestep = create_scene(p, False, SceneParameters(random_rotation = True, velocity_range=(1,10)))
     initial_orientation = p.getQuaternionFromEuler([0.0, 0.2, 0.0])
-
-    p.resetBasePositionAndOrientation(
-        cube_id,
-        p.getBasePositionAndOrientation(cube_id)[0],
-        initial_orientation
-    )
-    p.resetBaseVelocity(
-        cube_id,
-        linearVelocity=[0, 0, 0],
-        angularVelocity=[0, 0, 0]  # No rotation
-    )  # Forward velocity in x-direction
-
 
 
     log_id = p.startStateLogging(
@@ -132,11 +120,6 @@ def main():
         cube_id, -1,
         collisionFilterGroup=1,
         collisionFilterMask=0
-    )
-    p.resetBaseVelocity(
-        cube_id,
-        linearVelocity=[0, 0, 0],  # Forward velocity in x-direction
-        angularVelocity=[0, 0, 0]  # No rotation
     )
 
     while frame < MAX_FRAMES:

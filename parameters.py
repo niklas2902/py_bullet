@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
-@dataclass
-class Angles:
+
+class Angles(NamedTuple):
     theta: float = 0
     phi: float = 0
 

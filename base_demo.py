@@ -3,7 +3,7 @@ import time
 
 import pybullet as p
 import numpy as np
-from parameters import SceneParameters
+from parameters import SceneParameters, Angles
 from scene_creator import create_scene, reset_scene
 from own_physics import calculate_force, _contact_point_velocity
 
@@ -81,10 +81,10 @@ def main():
 
     plane_id, cube_id, timestep = create_scene(p, False, SceneParameters(random_rotation=False, 
                                                                          rotation_parts= (200,60,100),
-                                                                         velocity_range=(-3,-5)))
-    reset_scene(p, cube_id=cube_id, plane_id=plane_id, should_use_gravity=False, parameters=SceneParameters(random_rotation=False, 
-                                                                         rotation_parts= (200,60,100),
-                                                                         velocity_range=(-3,-5)))
+                                                                         velocity_range=(0.1,1), spawn_angles=(Angles(theta = 270, phi=90 ))))
+    #reset_scene(p, cube_id=cube_id, plane_id=plane_id, should_use_gravity=False, parameters=SceneParameters(random_rotation=False,
+    #                                                                     rotation_parts= (200,60,100),
+    #                                                                     velocity_range=(0.1,1), spawn_angles=(Angles(theta = math.pi ))))
 
     _disable_default_contact_response(cube_id)
     _disable_default_contact_response(plane_id)

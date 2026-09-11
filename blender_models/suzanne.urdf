@@ -1,39 +1,61 @@
 <?xml version="1.0"?>
-<!--
-  Suzanne URDF, sized to ~1m (matches PyBullet's default cube.urdf),
-  mass 1 kg. Inertia computed from mesh geometry, then scaled to mass.
--->
 <robot name="suzanne">
-  <link name="base_link">
-    <contact>
-      <lateral_friction value="0.6"/>
-      <rolling_friction value="0.001"/>
-      <contact_cfm value="0.0"/>
-      <contact_erp value="1.0"/>
-    </contact>
+  <!--
+    Dynamic Suzanne for PyBullet (same conventions as bunny.urdf).
+
+    GEOMETRY:
+    Mesh is uniformly scaled by 1/2.65187 = 0.3770924 so the largest extent (ear to ear, x) is 1 m.
+    Scaled extents: 1.000 x 0.720 x 0.604 m. Mesh axes kept as exported from Blender (y up, face toward +z).
+    The link frame sits at the true volumetric center of mass; visual/collision <origin> = -scale*COM.
+
+      Mesh-local COM: (0.0000, 0.2207, 0.0455)
+      Bbox center:    (0.0000, -0.0156, 0.0220)
+
+    SOLID MODEL:
+    The Blender mesh is not closed: the head has two eye-socket holes and the eyes are
+    open-backed domes. For the mass properties, all four boundary loops were capped and the
+    head and eyes were boolean-unioned (manifold3d) into one watertight solid, so the eye
+    region is counted once. Raw-unit volume 1.982607.
+
+    MASS: 1 kg, uniform density.
+
+    INERTIA: about the COM, in the link frame. Signed-tetrahedron integration (Mirtich 1996)
+    on the watertight solid, rescaled to m = 1 kg and mesh scale s (inertia ~ s^2 at fixed mass).
+    Cross-checked against a winding-number grid integration of the ORIGINAL open mesh
+    (no capping, no boolean): volume and all tensor entries agree to < 0.01 %.
+    ixy = ixz = 0 by the mesh's left/right mirror symmetry. iyz != 0: the principal axes
+    are rotated 36.2 deg about x relative to the mesh axes.
+
+    Principal moments: (0.0358, 0.0381, 0.0465) kg*m^2
+
+    COLLISION: suzanne_collision.obj - CoACD convex decomposition (threshold 0.03), 50 hulls,
+    one "o" block per hull. Hulls exceed the solid volume by 2.4 %.
+
+    Load with flags=p.URDF_USE_INERTIA_FROM_FILE, otherwise PyBullet ignores the tensor above.
+  -->
+  <link name="suzanne">
     <inertial>
-      <origin rpy="0 0 0" xyz="0.0 0.08311 0.02552"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="1.0"/>
-      <inertia ixx="3.856e-02"
-               iyy="4.338e-02"
-               izz="3.912e-02"
-               ixy="0.0"
-               ixz="0.0"
-               iyz="5.355e-03"/>
+      <inertia ixx="0.03814392" ixy="0.00000000" ixz="0.00000000"
+               iyy="0.04277184" iyz="0.00512584"
+               izz="0.03952438"/>
     </inertial>
+
     <visual>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <origin xyz="0.000000 -0.083223 -0.017163" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="suzanne.obj" scale="0.377092 0.377092 0.377092"/>
+        <mesh filename="suzanne.obj" scale="0.3770924 0.3770924 0.3770924"/>
       </geometry>
-      <material name="wood">
-        <color rgba="0.55 0.35 0.20 1.0"/>
+      <material name="suzanne_color">
+        <color rgba="0.80 0.62 0.45 1.0"/>
       </material>
     </visual>
+
     <collision>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <origin xyz="0.000000 -0.083223 -0.017163" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="suzanne.obj" scale="0.377092 0.377092 0.377092"/>
+        <mesh filename="suzanne_collision.obj" scale="0.3770924 0.3770924 0.3770924"/>
       </geometry>
     </collision>
   </link>

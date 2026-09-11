@@ -13,14 +13,11 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
     # No gravity
-    if should_use_gravity:
-        p.setGravity(0, 0, -9.81)
-    else:
-        p.setGravity(0, 0, 0)
+    p.setGravity(0, 0, 0)
 
     # Load plane
     plane_id = p.loadURDF(
-        "/home/niklas/Documents/privat/repositories/py_bullet/blender_models/bunny.urdf",
+        "/home/niklas/Documents/privat/repositories/py_bullet/blender_models/suzanne.urdf",
         basePosition=[0, 0, 0.5],
         baseOrientation=random_quaternion()
     )
@@ -51,7 +48,8 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
     sphere_radius = parameters.spawn_radius
 
     # Make cube bouncy
-    p.changeDynamics(cube_id, -1, restitution=0.5)
+    p.changeDynamics(cube_id, -1, restitution=0)
+    p.changeDynamics(plane_id, -1, mass=0)
 
     # **DISABLE COLLISION RESPONSE but KEEP COLLISION DETECTION**
     p.setCollisionFilterPair(plane_id, cube_id, -1, -1, enableCollision=1)
@@ -65,13 +63,10 @@ def create_scene(p, should_use_gravity: bool = False, parameters:SceneParameters
 
     # Give initial downward velocity (since gravity is off)
     p.resetBaseVelocity(cube_id,
-                        linearVelocity=normalized(np.array([0,0,random.uniform(-sphere_radius, sphere_radius)]) - np.array(spawn_point)) 
+                        linearVelocity=normalized(-np.array(spawn_point))
                         * random.uniform(parameters.velocity_range[0],parameters.velocity_range[1]) ,
                         angularVelocity=random_angular_velocity())
 
-    p.resetBaseVelocity(plane_id,
-                        linearVelocity=np.array([0,0,0]),
-                        angularVelocity=random_angular_velocity())
 
     timestep = 1.0 / 240
     p.setTimeStep(timestep)
@@ -83,16 +78,14 @@ def reset_scene(p, cube_id,  plane_id, should_use_gravity: bool, parameters: Sce
         p.setGravity(0, 0, -9.81)
     else:
         p.setGravity(0, 0, 0)
-    
-    p.resetBasePositionAndOrientation(plane_id, [0,0,0], random_quaternion())
-    random_rotation_and_position(cube_id, plane_id , p, parameters)
+
+    random_rotation_and_position(cube_id, plane_id, p, parameters)
 
     spawn_point, _ = p.getBasePositionAndOrientation(cube_id)
     sphere_radius = parameters.spawn_radius
 
-    p.resetBaseVelocity(plane_id, linearVelocity=[0,0,0], angularVelocity=random_angular_velocity())
     p.resetBaseVelocity(cube_id,
-                        linearVelocity=normalized(np.array([0,0,random.uniform(-sphere_radius, sphere_radius)]) - np.array(spawn_point)) 
+                        linearVelocity=normalized(-np.array(spawn_point))
                         * random.uniform(parameters.velocity_range[0],parameters.velocity_range[1]) ,
                         angularVelocity=random_angular_velocity())
 
@@ -125,12 +118,11 @@ def random_rotation_and_position(cube_id, plane_id, p, parameters:SceneParameter
     pts = p.getClosestPoints(bodyA=cube_id, bodyB=plane_id, distance=10)
     nearest = min(pts, key=lambda c: c[8]) if pts else None
     dist = (np.array(nearest[6]) - np.array(nearest[5]))
-    normalized_dist = np.array([0,0,0]) # normalized(dist)
-
+    normalized_dist = dist / np.linalg.norm(dist) # normalized(dist)
     if parameters.random_rotation:
-        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 3, rot)
+        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist, rot)
     else:
-        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 3, rot)
+        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist, rot)
 
 
 def get_min_z(global_vertex_positions):
