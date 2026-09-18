@@ -238,12 +238,12 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any],
             "y": float(objectA_pos[1]),
             "z": float(objectA_pos[2]),
         },
-        "linear_velocityA": {
+        "linear_velocity_A": {
             "x": float(linear_velA[0]),
             "y": float(linear_velA[1]),
             "z": float(linear_velA[2]),
         },
-        "angular_velocity": {
+        "angular_velocity_A": {
             "x": float(angular_velA[0]),
             "y": float(angular_velA[1]),
             "z": float(angular_velA[2]),
@@ -307,6 +307,8 @@ def record_collision_empty(p, objectA_id: int, objectB_id:int, empty_collision_p
                                          [0, 0, 0], quatA)[1]
     
     relative_euler = p.getEulerFromQuaternion(relative_quat)
+    A_euler = p.getEulerFromQuaternion(quatA)
+    B_euler = p.getEulerFromQuaternion(quatB)
 
 
     linear_velA, angular_velA = p.getBaseVelocity(objectA_id)
@@ -318,7 +320,7 @@ def record_collision_empty(p, objectA_id: int, objectB_id:int, empty_collision_p
         "x": float(posA[0]),
         "y": float(posA[1]),
         "z": float(posA[2])
-    },
+    }
     
     collision_point_entry["B_position"] = {
         "x": float(posB[0]),
@@ -339,14 +341,14 @@ def record_collision_empty(p, objectA_id: int, objectB_id:int, empty_collision_p
     }
 
     collision_point_entry["A_rotation"] = {
-        "x": float(quatA[0]),
-        "y": float(quatA[1]),
-        "z": float(quaternion_to_euler(p, quatA))
+        "roll": float(A_euler[0]),
+        "pitch": float(A_euler[1]),
+        "yaw": float(A_euler[2])
     }
     collision_point_entry["B_rotation"] = {
-        "x": float(quatB[0]),
-        "y": float(quatB[1]),
-        "z": float(quaternion_to_euler(p, quatB))
+        "roll": float(B_euler[0]),
+        "pitch": float(B_euler[1]),
+        "yaw": float(B_euler[2])
     }
     collision_point_entry["linear_velocity_A"] = {
         "x": linear_velA[0],
