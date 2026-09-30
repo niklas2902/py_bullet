@@ -1,4 +1,5 @@
 import math
+import random
 import time
 
 import pybullet as p
@@ -7,7 +8,7 @@ from parameters import SceneParameters, Angles
 from scene_creator import create_scene, reset_scene
 from own_physics import calculate_force, _contact_point_velocity
 
-MAX_FRAMES = 2000
+MAX_FRAMES = 20000
 
 REST_LINEAR_DAMPING = 10.0  # N·s/m  — opposes linear velocity while in contact
 REST_ANGULAR_DAMPING = 1.2  # N·m·s/rad — opposes angular velocity while in contact
@@ -44,7 +45,9 @@ def apply_impulse_predictor(cube_id, current_linear_vel, current_angular_vel, co
         net_force += force_vector
         r = contact_pos_world - cube_pos
         net_torque += np.cross(r, force_vector)
-    print(np.linalg.norm(net_force))
+    if len(contact_points) > 0:
+        print("force:", np.linalg.norm(net_force))
+        print(net_force)
     #if(np.linalg.norm(net_force) < FORCE_CLAMPING_START):
     #    net_force  += -REST_LINEAR_DAMPING  * np.array(current_linear_vel)
     
@@ -69,6 +72,13 @@ def _disable_default_contact_response(body_id):
             contactDamping=1e-9,
         )
 
+def get_phi():
+    return random.random() * 360
+
+
+def get_theta():
+    return random.random() * 360
+
 
 def main():
     physics_client = p.connect(p.GUI)
@@ -79,12 +89,12 @@ def main():
 
     log_id = p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, "collision_run_gt.mp4")
 
-    plane_id, cube_id, timestep = create_scene(p, False, SceneParameters(random_rotation=False, 
+    plane_id, cube_id, timestep = create_scene(p, False, SceneParameters(random_rotation=False,
+                                                                         rotation_parts= (0,0,0),
+                                                                         velocity_range=(1*0.01,1*0.001), spawn_angles=(Angles(theta = get_theta(), phi=get_phi() ))))
+    reset_scene(p, cube_id=cube_id, plane_id=plane_id, should_use_gravity=False, parameters=SceneParameters(random_rotation=False,
                                                                          rotation_parts= (200,60,100),
-                                                                         velocity_range=(0.1,1), spawn_angles=(Angles(theta = 270, phi=90 ))))
-    #reset_scene(p, cube_id=cube_id, plane_id=plane_id, should_use_gravity=False, parameters=SceneParameters(random_rotation=False,
-    #                                                                     rotation_parts= (200,60,100),
-    #                                                                     velocity_range=(0.1,1), spawn_angles=(Angles(theta = math.pi ))))
+                                                                         velocity_range=(0.01,0.001), spawn_angles=(Angles(theta = math.pi ))))
 
     _disable_default_contact_response(cube_id)
     _disable_default_contact_response(plane_id)
@@ -92,7 +102,14 @@ def main():
     frame = 0
     while frame < MAX_FRAMES:
         p.stepSimulation()
-
+        direction = np.array(p.getBasePositionAndOrientation(plane_id)[0]) - np.array(
+        p.getBasePositionAndOrientation(cube_id)[0])
+        normal_direction = direction / np.linalg.norm(direction)
+        com_world, _ = p.getBasePositionAndOrientation(cube_id)
+        #p.applyExternalForce(cube_id, -1,
+        #                     forceObj=3 * normal_direction,
+        #                     posObj=com_world,
+        #                     flags=p.WORLD_FRAME)
         current_linear_vel, current_angular_vel = p.getBaseVelocity(cube_id)
         contact_points = p.getContactPoints(bodyA=cube_id, bodyB=plane_id)
 
@@ -112,8 +129,8 @@ def main():
         if frame % 30 == 0:
             pos, _ = p.getBasePositionAndOrientation(cube_id)
             max_pen = max((c[8] for c in contact_points), default=0.0)
-            print(f"f, mass=0={frame:4d} z={pos[2]:+.3f} vz={current_linear_vel[2]:+.3f} "
-                  f"n={len(contact_points):2d} pen={max_pen:.4f}")
+            #print(f"f, mass=0={frame:4d} z={pos[2]:+.3f} vz={current_linear_vel[2]:+.3f} "
+            #      f"n={len(contact_points):2d} pen={max_pen:.4f}")
 
         frame += 1
         if connection_type == p.GUI:

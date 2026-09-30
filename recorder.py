@@ -102,7 +102,8 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any],
 
         v_contactA = _contact_point_velocity(objectA_id, contact_pos_on_selfA, linear_velA, angular_velA)
         forceA = calculate_force(contact_normalA, contactA[8], objectA_id, v_contactA.tolist())
-
+        if list(forceA) == [0.0, 0.0, 0.0]:
+            return
         v_contactB = _contact_point_velocity(objectB_id, contact_pos_on_selfB, linear_velB, angular_velB)
         forceB = calculate_force(contact_normalB, contactB[8], objectB_id, v_contactB.tolist())
 
@@ -112,25 +113,10 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any],
                 "y": float(contact_pos_on_selfA[1]),
                 "z": float(contact_pos_on_selfA[2]),
             },
-            "contact_position_relative_to_A": {
-                "x": float(lever_armA[0]),
-                "y": float(lever_armA[1]),
-                "z": float(lever_armA[2]),
-            },
-            "contact_position_relative_to_B": {
-                "x": float(lever_armB[0]),
-                "y": float(lever_armB[1]),
-                "z": float(lever_armB[2]),
-            },
             "forceA": {
                 "x": float(forceA[0]),
                 "y": float(forceA[1]),
                 "z": float(forceA[2]),
-            },
-            "forceB": {
-                "x": float(forceB[0]),
-                "y": float(forceB[1]),
-                "z": float(forceB[2]),
             },
             "penetration": contactA[8],
             "contact_normalA": {
@@ -138,11 +124,6 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any],
                 "y": float(contact_normalA[1]),
                 "z": float(contact_normalA[2]),
             },
-            "contact_normalB": {
-                "x": float(contact_normalB[0]),
-                "y": float(contact_normalB[1]),
-                "z": float(contact_normalB[2]),
-            }
         })
 
     collision_entry = {
@@ -152,20 +133,10 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any],
             "y": float(linear_velA[1]),
             "z": float(linear_velA[2]),
         },
-        "linear_velocityB": {
-            "x": float(linear_velB[0]),
-            "y": float(linear_velB[1]),
-            "z": float(linear_velB[2]),
-        },
         "angular_velocityA": {
             "x": float(angular_velA[0]),
             "y": float(angular_velA[1]),
             "z": float(angular_velA[2]),
-        },
-        "angular_velocityB": {
-            "x": float(angular_velB[0]),
-            "y": float(angular_velB[1]),
-            "z": float(angular_velB[2]),
         },
         "A_pos": {
             "x": float(objectA_pos[0]),
@@ -206,24 +177,6 @@ def record_collision(p, collision_data: list[Any], collision_points: list[Any],
             "pitch": float(relative_euler[1]),
             "yaw": float(relative_euler[2]),
         },
-        "A_scale": {
-            "x": 1.0,
-            "y": 1.0,
-            "z": 1.0,
-        },
-        "B_scale": {
-            "x": 1.0,
-            "y": 1.0,
-            "z": 1.0,
-        },
-        "A_transform": create_transform_data(p, objectA_pos, objectA_quat, [1.0, 1.0, 1.0]),
-        "B_transform": create_transform_data(p, objectB_pos, objectB_quat, [1.0, 1.0, 1.0]),
-        "collider_scale": {
-            "x": 1.0,
-            "y": 1.0,
-            "z": 1.0,
-        },
-        "collider_transform": create_transform_data(p, objectB_pos, objectB_quat, [1.0, 1.0, 1.0]),
         "points": points,
         "A_mesh": None,
         "B_mesh": None,
@@ -355,21 +308,10 @@ def record_collision_empty(p, objectA_id: int, objectB_id:int, empty_collision_p
         "y": linear_velA[1],
         "z": linear_velA[2]
     }
-    collision_point_entry["linear_velocity_B"] = {
-        "x": linear_velB[0],
-        "y": linear_velB[1],
-        "z": linear_velB[2]
-    }
     collision_point_entry["angular_velocity_A"] = {
         "x": angular_velA[0],
         "y": angular_velA[1],
         "z": angular_velA[2]
     }
-    collision_point_entry["angular_velocity_B"] = {
-        "x": angular_velB[0],
-        "y": angular_velB[1],
-        "z": angular_velB[2]
-    }
-
     collision_point_entry["points"] = []
     empty_collision_points.append(collision_point_entry)

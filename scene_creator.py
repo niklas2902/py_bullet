@@ -120,9 +120,9 @@ def random_rotation_and_position(cube_id, plane_id, p, parameters:SceneParameter
     dist = (np.array(nearest[6]) - np.array(nearest[5]))
     normalized_dist = dist / np.linalg.norm(dist) # normalized(dist)
     if parameters.random_rotation:
-        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist, rot)
+        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 0.001, rot)
     else:
-        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist, rot)
+        p.resetBasePositionAndOrientation(cube_id, np.array(pos) + dist - normalized_dist * 0.001, rot)
 
 
 def get_min_z(global_vertex_positions):
